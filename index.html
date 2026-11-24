@@ -44,10 +44,14 @@
   <div class="readout" id="readout"></div>
 
   <footer class="controls" id="controls">
-    <div class="hint" id="hint">Pick a spin, drag to move, then swipe up toward the arrows.</div>
+    <div class="hint" id="hint">Pick spin and speed, drag to move, then swipe up to aim.</div>
     <div class="spin-wrap">
       <div class="spin-head"><span class="eyebrow">Spin</span><span class="spin-label" id="spinLabel">Straight</span></div>
       <div class="spin-row" id="spinRow" role="group" aria-label="Spin"></div>
+    </div>
+    <div class="spin-wrap">
+      <div class="spin-head"><span class="eyebrow">Speed</span><span class="spin-label" id="speedLabel">17 mph · Medium</span></div>
+      <div class="speed-row" id="speedRow" role="group" aria-label="Ball speed"></div>
     </div>
     <div class="control-row">
       <div class="slider" id="slider" role="slider" aria-label="Ball position" aria-valuemin="1" aria-valuemax="39" tabindex="0">
@@ -68,8 +72,8 @@
       <p class="tag">Prototype v0.2 · Floor 1 run</p>
       <ul class="howto">
         <li><b>Move</b> by dragging the bar at the bottom.</li>
-        <li><b>Throw</b> by swiping up on the lane toward the arrows.</li>
-        <li><b>Spin</b> by tapping a curve button. The dotted line shows where the ball will hook.</li>
+        <li><b>Spin and speed</b>: tap a curve and a speed before you throw. Slower balls hook more. The dotted line shows the path.</li>
+        <li><b>Throw</b> by swiping up on the lane. The swipe only sets your aim, so take your time.</li>
         <li><b>Clear 3 stations</b> to finish the floor. Spend cash on charms and balls in the Pro Shop between them.</li>
       </ul>
       <p class="goal">Score = Pins × Mult.<br />Strike ×4 · Spare ×3 · Split pickup ×5 · Turkey ×8</p>

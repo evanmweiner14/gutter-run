@@ -22,7 +22,7 @@ const PIN_SPOTS = [
   [0, 0], [-6, 1], [6, 1], [-12, 2], [0, 2], [12, 2], [-18, 3], [-6, 3], [6, 3], [18, 3],
 ].map(([x, r]) => ({ x, z: L + r * ROW }));
 
-const T = { hook: 1.0, oilFt: 40, bounce: 0.62, downSens: 1.0, speedMul: 1.0, guide: 1, lieR: 3.6, swipeSpin: 0 };
+const T = { hook: 1.0, oilFt: 40, bounce: 0.62, downSens: 1.0, speedMul: 1.0, guide: 1, lieR: 3.6, swipeSpin: 0, swipeSpeed: 0 };
 const TUNE_DEFS = [
   ['hook', 'Hook strength', 0, 2.5, 0.05],
   ['oilFt', 'Oil length (ft)', 30, 50, 1],
@@ -32,6 +32,7 @@ const TUNE_DEFS = [
   ['lieR', 'Fallen pin spread', 2.4, 5, 0.1],
   ['guide', 'Aim guide (0 off / 1 on)', 0, 1, 1],
   ['swipeSpin', 'Swipe curve adds spin (0 off / 1 on)', 0, 1, 1],
+  ['swipeSpeed', 'Swipe speed sets ball speed (0 off / 1 on)', 0, 1, 1],
 ];
 
 // ---------- Run structure ----------
@@ -115,6 +116,7 @@ const S = {
   lastThrow: null,
   aimX: 0,
   spin: 0,
+  speed: 17,
   lastAng: 0,
 };
 const ball = { x: 0, z: 10, vx: 0, vz: 0, r: BALL_R, m: BALL_M, spin: 0, active: false, gutter: false, done: false, roll: 0 };
@@ -447,7 +449,7 @@ function newStation() {
     stats: { strikes: 0, spares: 0, splits: 0, gutters: 0, best: 0 }, lastThrow: null });
   makeRack(); resetBall(); cam.z = 0;
   S.mode = 'aim';
-  $('hint').textContent = R.boss ? R.boss.hint :'Pick a spin, drag to move, then swipe up toward the arrows.';
+  $('hint').textContent = R.boss ? R.boss.hint :'Pick spin and speed, drag to move, then swipe up to aim.';
   updateHUD(); renderReadout();
 }
 
@@ -677,7 +679,7 @@ function analyzeSwipe(sw) {
   const dt = Math.max(16, tEnd - p0.t);
   const pxms = Math.hypot(b.x - p0.x, b.y - p0.y) / dt;
   const vN = pxms * 1000 / H;
-  const mph = Math.max(9, Math.min(25, 9 + vN * 3.3));
+  const mph = T.swipeSpeed ? Math.max(9, Math.min(25, 9 + vN * 3.3)) : S.speed;
   // aim: ray from ball screen position along chord, crossing the arrows
   const bp = proj(ball.x, ball.z);
   const ap = proj(0, ARROW_Z);
@@ -745,6 +747,26 @@ function setSpin(v) {
   $('spinLabel').textContent = spinLabel(v);
 }
 setSpin(0);
+
+// speed selector: set before the throw; the swipe only aims
+const SPEED_STOPS = [13, 15, 17, 19, 21];
+function speedLabel(v) { return `${v} mph · ${v <= 13 ? 'Slow' : v <= 15 ? 'Easy' : v <= 17 ? 'Medium' : v <= 19 ? 'Firm' : 'Fast'}`; }
+(function buildSpeed() {
+  const host = $('speedRow');
+  SPEED_STOPS.forEach((v) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'speed-btn'; b.textContent = v;
+    b.setAttribute('aria-label', speedLabel(v)); b.dataset.v = v;
+    b.addEventListener('click', () => setSpeed(v));
+    host.appendChild(b);
+  });
+})();
+function setSpeed(v) {
+  S.speed = v;
+  document.querySelectorAll('.speed-btn').forEach((b) => b.classList.toggle('on', +b.dataset.v === v));
+  $('speedLabel').textContent = speedLabel(v);
+}
+setSpeed(17);
 
 $('rerackBtn').addEventListener('click', () => {
   if (!(S.mode === 'aim' && S.ballInFrame === 2 && S.reracks > 0)) return;
@@ -998,7 +1020,7 @@ function render() {
     const maxA = 7 * Math.PI / 180;
     let ang = r ? Math.atan2(r.targetX - ball.x, ARROW_Z - ball.z) : S.lastAng;
     ang = Math.max(-maxA, Math.min(maxA, ang));
-    const pred = predictPath(ball.x, ang, r ? r.mph : 17, r ? r.spin : S.spin);
+    const pred = predictPath(ball.x, ang, r ? r.mph : S.speed, r ? r.spin : S.spin);
     ctx.setLineDash([7, 6]); ctx.lineWidth = 2.5;
     ctx.strokeStyle = pred.gutter ? 'rgba(226,72,61,.9)' : r ? 'rgba(255,176,46,.95)' : 'rgba(255,176,46,.7)';
     ctx.beginPath();
