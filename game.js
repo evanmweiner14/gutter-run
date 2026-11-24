@@ -36,16 +36,19 @@ const TUNE_DEFS = [
 ];
 
 // ---------- Run structure ----------
-const RUN_FLOORS = 1;              // Phase 1 = one full floor; raise when more bosses exist
+const RUN_FLOORS = 8;              // floor 8's boss is always The Proprietor
 const STATIONS = [
   { key: 'open', name: 'Open Lane', tmult: 1, reward: 3 },
   { key: 'league', name: 'League Night', tmult: 1.35, reward: 4 },
   { key: 'boss', name: 'Boss Lane', tmult: 1.75, reward: 5 },
 ];
-const BASE_TARGET = 900, FLOOR_GROWTH = 1.8;
+// Open Lane target per floor; League Night and Boss Lane scale it by tmult. First pass, retune after the charm expansion.
+const FLOOR_TARGETS = [900, 1300, 1800, 2500, 3400, 4600, 6200, 8300];
+const BASE_TARGET = FLOOR_TARGETS[0];
 const BASE_FRAMES = 5, BASE_RERACKS = 2, CHARM_SLOTS = 5, BAG_SLOTS = 3, START_CASH = 4, REROLL_BASE = 5;
 function stationTarget(floor, idx) {
-  return Math.round(BASE_TARGET * Math.pow(FLOOR_GROWTH, floor - 1) * STATIONS[idx].tmult / 50) * 50;
+  const base = FLOOR_TARGETS[Math.min(floor, FLOOR_TARGETS.length) - 1];
+  return Math.round(base * STATIONS[idx].tmult / 50) * 50;
 }
 
 // ---------- Content (data-driven) ----------
@@ -58,9 +61,44 @@ const BALLS = {
     colors: ['#ffc38a', '#d4541c', '#7a2108', '#3a0d02'], swirl: 'rgba(255,240,200,.3)' },
 };
 
+// Boss rules are plain fields read by the physics, scoring and HUD:
+// tilt (in/s² sideways), oilFt (oil length), trim (inches of lane lost per side), fog (z beyond which the lane is hidden),
+// moving (rack sway in inches), bolted (pins that can't fall), pinMass/downMul (heavier, sturdier pins),
+// maxSpeed (mph cap), frames/reracks (station changes), thief (disable a random charm), score(c) (runs after charms).
 const BOSSES = [
-  { id: 'tilt', name: 'The Tilt', desc: 'The lane slopes left. Every ball drifts toward the left gutter.', hint: 'The Tilt: the lane slopes left. Aim right.', tilt: -6 },
+  { id: 'tilt', icon: '📐', name: 'The Tilt', desc: 'The lane slopes left. Every ball drifts toward the left gutter.',
+    hint: 'The Tilt: the lane slopes left. Aim right.', tilt: -6 },
+  { id: 'fog', icon: '☁️', name: 'Fog Machine', desc: 'The back half of the lane is hidden until the pins settle.',
+    hint: 'Fog Machine: trust the pin map and your line.', fog: 380 },
+  { id: 'moving', icon: '🚚', name: 'Moving Day', desc: 'The rack slides side to side while you line up.',
+    hint: 'Moving Day: time your throw to the rack.', moving: 7 },
+  { id: 'bolted', icon: '🔩', name: 'Bolted', desc: 'Two pins in every rack are bolted down. They never fall and don\'t count.',
+    hint: 'Bolted: the steel pins won\'t fall. Play around them.', bolted: 2 },
+  { id: 'spareme', icon: '🙅', name: 'Spare Me', desc: 'First balls score nothing, strikes included. Spares and split pickups get double Mult.',
+    hint: 'Spare Me: leave pins on ball one, then pick up the spare.',
+    score(c) { if (c.firstBall && c.mult > 0) { c.mult = 0; return true; } if (c.type === 'spare' || c.type === 'split') { c.mult *= 2; return true; } } },
+  { id: 'wide', icon: '🚧', name: 'Wide Gutters', desc: 'The gutters eat 3 inches of lane on each side.',
+    hint: 'Wide Gutters: stay off the edges.', trim: 3 },
+  { id: 'thief', icon: '🐀', name: 'Charm Thief', desc: 'One of your charms is disabled for this station.',
+    hint: 'Charm Thief: one charm is switched off.', thief: true },
+  { id: 'slick', icon: '💧', name: 'The Slick', desc: 'Oil runs to 55 feet. The ball barely hooks.',
+    hint: 'The Slick: almost no hook. Play straighter.', oilFt: 55 },
+  { id: 'burn', icon: '🌵', name: 'The Burn', desc: 'A bone-dry lane. The ball hooks from the foul line.',
+    hint: 'The Burn: no oil, so hooks start early. Use less spin.', oilFt: 0 },
+  { id: 'lead', icon: '⚓', name: 'Lead Rack', desc: 'Heavy, sturdy pins that are harder to knock over.',
+    hint: 'Lead Rack: hit the pocket hard.', pinMass: 1.8, downMul: 0.65 },
+  { id: 'speedtrap', icon: '🚨', name: 'Speed Trap', desc: 'Ball speed is capped at 15 mph.',
+    hint: 'Speed Trap: 15 mph max. Slow balls hook more.', maxSpeed: 15 },
+  { id: 'clock', icon: '⏰', name: 'The Clock', desc: 'One frame fewer and no re-racks.',
+    hint: 'The Clock: 4 frames, no re-racks.', frames: -1, reracks: 0 },
 ];
+const FINAL_BOSS = { id: 'proprietor', icon: '🎩', name: 'The Proprietor', final: true,
+  desc: 'The owner stacks the deck: the lane slopes left, the gutters are wider and the pins are heavier.',
+  hint: 'The Proprietor: tilt, wide gutters and heavy pins.', tilt: -5, trim: 2.5, pinMass: 1.4, downMul: 0.8 };
+const bossForFloor = (f) => (f >= RUN_FLOORS ? FINAL_BOSS : BOSSES.find((b) => b.id === R.bossOrder[f - 1]) || BOSSES[0]);
+const boss = () => R.boss || {};
+const oilZ = () => (boss().oilFt ?? T.oilFt) * 12;
+const laneEdge = () => LANE_HALF - (boss().trim || 0);
 
 // Charms subscribe to events. score(c) gets the roll context { type, strike, streak, knocked, domino,
 // lastFrame, pins, mult } and returns true when it changed something. stationStart(st) can edit { frames, reracks }.
@@ -86,11 +124,15 @@ const charmById = (id) => CHARMS.find((c) => c.id === id);
 
 // Run state (persists across stations)
 const R = { floor: 1, station: 0, cash: START_CASH, charms: [], bag: ['house'], ballId: 'house', boss: null,
-  rerollCost: REROLL_BASE, offers: [], cleared: [], totals: { score: 0, strikes: 0, spares: 0 } };
+  bossOrder: [], stolen: null, rerollCost: REROLL_BASE, offers: [], cleared: [], totals: { score: 0, strikes: 0, spares: 0 } };
 const curBall = () => BALLS[R.ballId];
 function fire(event, ctx) {
   const fired = [];
-  for (const id of R.charms) { const ch = charmById(id); if (ch[event] && ch[event](ctx)) fired.push(ch); }
+  for (const id of R.charms) {
+    if (id === R.stolen) continue;
+    const ch = charmById(id); if (ch[event] && ch[event](ctx)) fired.push(ch);
+  }
+  if (R.boss && R.boss[event] && R.boss[event](ctx)) fired.push(R.boss);
   return fired;
 }
 
@@ -125,12 +167,23 @@ const cam = { z: 0 };
 let standingBefore = [];
 
 function makeRack() {
+  const b = boss();
+  const off = S.rackOff || 0;
   pins = PIN_SPOTS.map((p, i) => ({
-    n: i + 1, x: p.x, z: p.z, sx: p.x, sz: p.z, vx: 0, vz: 0, r: PIN_R, m: PIN_M,
-    alive: true, down: false, fallT: 0, fx: 0, fz: 1, wobble: 0, gutter: false, fade: 1,
+    n: i + 1, x: p.x + off, z: p.z, sx: p.x + off, sz: p.z, vx: 0, vz: 0, r: PIN_R, m: PIN_M * (b.pinMass || 1),
+    alive: true, down: false, fallT: 0, fx: 0, fz: 1, wobble: 0, gutter: false, fade: 1, bolted: false,
   }));
+  if (b.bolted) {
+    // never bolt the head pin, so there is always a pocket to aim at
+    const pool = pins.filter((p) => p.n !== 1);
+    for (let k = 0; k < b.bolted && pool.length; k++) {
+      const p = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
+      p.bolted = true; p.m = 1e6;
+    }
+  }
 }
-const standing = () => pins.filter((p) => p.alive && !p.down);
+// pins that count for scoring (bolted pins never fall and never count)
+const standing = () => pins.filter((p) => p.alive && !p.down && !p.bolted);
 
 // ---------- Layout / projection ----------
 let W = 0, H = 0, DPR = 1, F = 1, D = 371, topY = 0, bottomY = 0, VIS = L + 70;
@@ -224,7 +277,7 @@ function rollKinematics(b, dt, oilZ) {
   const a = 40 * T.hook * curBall().hook * b.spin * dry * slowBoost * (b.z < L + 10 ? 1 : 0.3);
   // positive spin pushes the ball toward -x (hooks left)
   b.vx += (-b.vz / v) * a * dt;
-  if (R.boss && R.boss.tilt && b.z < L) b.vx += R.boss.tilt * dt;
+  if (boss().tilt && b.z < L) b.vx += boss().tilt * dt;
   const dec = 10 * dt;
   b.vx -= (b.vx / v) * dec; b.vz -= (b.vz / v) * dec;
 }
@@ -232,26 +285,28 @@ function rollKinematics(b, dt, oilZ) {
 function predictPath(x, ang, mph, spin) {
   const v = mph * T.speedMul * MPH;
   const b = { x, z: ball.z, vx: v * Math.sin(ang), vz: v * Math.cos(ang), spin };
-  const oilZ = T.oilFt * 12, dt = 1 / 120, pts = [[b.x, b.z]];
-  for (let i = 0; i < 1200 && b.z < L; i++) {
-    rollKinematics(b, dt, oilZ);
+  const oz = oilZ(), edge = laneEdge(), dt = 1 / 120, pts = [[b.x, b.z]];
+  const zEnd = boss().fog ? Math.min(L, boss().fog) : L;   // the guide can't see into the fog
+  for (let i = 0; i < 1200 && b.z < zEnd; i++) {
+    rollKinematics(b, dt, oz);
     b.x += b.vx * dt; b.z += b.vz * dt;
     if (i % 6 === 0) pts.push([b.x, b.z]);
-    if (Math.abs(b.x) > LANE_HALF) { pts.push([b.x, b.z]); return { pts, gutter: true }; }
+    if (Math.abs(b.x) > edge) { pts.push([b.x, b.z]); return { pts, gutter: true }; }
   }
   pts.push([b.x, b.z]);
   return { pts, gutter: false };
 }
 
 function step(dt) {
-  const oilZ = T.oilFt * 12;
+  const oz = oilZ(), downSens = T.downSens * (boss().downMul || 1);
   // ball
   if (ball.active && !ball.done) {
     const v = Math.hypot(ball.vx, ball.vz);
-    if (!ball.gutter && v > 1) rollKinematics(ball, dt, oilZ);
+    if (!ball.gutter && v > 1) rollKinematics(ball, dt, oz);
     ball.x += ball.vx * dt; ball.z += ball.vz * dt;
     ball.roll += v * dt;
-    if (!ball.gutter && Math.abs(ball.x) > LANE_HALF && ball.z < PIT) {
+    // Wide Gutters trims the lane up to the pin deck; the deck itself keeps full width
+    if (!ball.gutter && Math.abs(ball.x) > (ball.z < L - 12 ? laneEdge() : LANE_HALF) && ball.z < PIT) {
       ball.gutter = true;
       ball.x = Math.sign(ball.x) * (LANE_HALF + GUTTER_W * 0.5);
       ball.vz = Math.hypot(ball.vx, ball.vz) * 0.95; ball.vx = 0;
@@ -263,6 +318,7 @@ function step(dt) {
   // pins
   for (const p of pins) {
     if (!p.alive) continue;
+    if (p.bolted) { p.x = p.sx; p.z = p.sz; p.vx = p.vz = 0; continue; }
     if (p.down && p.r < T.lieR) p.r = Math.min(T.lieR, p.r + dt * 20);
     const v = Math.hypot(p.vx, p.vz);
     if (v > 0) {
@@ -279,7 +335,7 @@ function step(dt) {
     if (!p.down) {
       const disp = Math.hypot(p.x - p.sx, p.z - p.sz);
       const sp = Math.hypot(p.vx, p.vz);
-      if (disp > 1.9 / T.downSens || sp > 24 / T.downSens || p.gutter) {
+      if (disp > 1.9 / downSens || sp > 24 / downSens || p.gutter) {
         p.down = true; p.fallT = 0;
         const dl = sp > 1 ? sp : Math.max(0.001, disp);
         p.fx = sp > 1 ? p.vx / dl : (p.x - p.sx) / dl; p.fz = sp > 1 ? p.vz / dl : (p.z - p.sz) / dl;
@@ -337,7 +393,8 @@ function evaluateRoll() {
   const knockedNums = standingBefore.filter((n) => !now.includes(n));
   const knocked = knockedNums.length;
   const domino = pins.filter((p) => knockedNums.includes(p.n) && !p.ballHit).length;
-  const fresh = standingBefore.length === 10 && S.ballInFrame === 1;
+  const firstBall = S.ballInFrame === 1;
+  const fresh = firstBall && standingBefore.length === 10 - pins.filter((p) => p.bolted).length;
   let title, bonus = 0, mult = 1, cls = '', type = 'open';
   let frameOver = false;
   const missType = () => { type = ball.gutter ? 'gutter' : 'miss'; title = ball.gutter ? 'GUTTER' : 'MISS'; mult = ball.gutter ? 0 : 1; cls = 'red'; if (ball.gutter) S.stats.gutters++; };
@@ -367,7 +424,7 @@ function evaluateRoll() {
     S.strikeStreak = 0;
     frameOver = true;
   }
-  const c = { type, strike: type === 'strike' || type === 'turkey', streak: S.strikeStreak, knocked, domino,
+  const c = { type, firstBall, strike: type === 'strike' || type === 'turkey', streak: S.strikeStreak, knocked, domino,
     lastFrame: S.frame === S.frames - 1, pins: knocked * 10 + bonus, mult };
   const fired = fire('score', c);
   const pinsVal = c.pins, total = Math.round(c.pins * c.mult);
@@ -419,7 +476,7 @@ function endStation(won) {
   if (won && finalStation) {
     $('endTitle').textContent = 'Run Complete!';
     rows = [['Run score', R.totals.score.toLocaleString()], ['Strikes', R.totals.strikes], ['Spares', R.totals.spares], ['Cash left', '$' + R.cash]];
-    cashHtml = `<p class="end-note">You beat ${R.boss ? R.boss.name : 'the boss'} and cleared Floor ${R.floor}. More floors arrive in Phase 2.</p>`;
+    cashHtml = `<p class="end-note">You beat ${R.boss ? R.boss.name : 'the boss'} and cleared all ${RUN_FLOORS} floors of the alley.</p>`;
     $('againBtn').textContent = 'New Run'; endAction = startRun;
   } else if (won) {
     $('endTitle').textContent = R.station === STATIONS.length - 1 ? 'Boss Beaten!' : 'Station Cleared';
@@ -441,35 +498,47 @@ function endStation(won) {
 
 function newStation() {
   const def = STATIONS[R.station];
-  R.boss = def.key === 'boss' ? BOSSES[(R.floor - 1) % BOSSES.length] : null;
+  R.boss = def.key === 'boss' ? bossForFloor(R.floor) : null;
+  const b = boss();
+  R.stolen = b.thief && R.charms.length ? R.charms[Math.floor(Math.random() * R.charms.length)] : null;
+  S.rackOff = 0;
+  S.fogA = b.fog ? 1 : 0;
   const st = { frames: BASE_FRAMES, reracks: BASE_RERACKS };
   fire('stationStart', st);
+  st.frames = Math.max(1, st.frames + (b.frames || 0));
+  if (b.reracks != null) st.reracks = b.reracks;
+  applySpeedCap();
   Object.assign(S, { score: 0, shownScore: 0, frame: 0, ballInFrame: 1, reracks: st.reracks, frames: st.frames,
     target: stationTarget(R.floor, R.station), strikeStreak: 0, wasSplit: false,
     stats: { strikes: 0, spares: 0, splits: 0, gutters: 0, best: 0 }, lastThrow: null });
   makeRack(); resetBall(); cam.z = 0;
   S.mode = 'aim';
-  $('hint').textContent = R.boss ? R.boss.hint :'Pick spin and speed, drag to move, then swipe up to aim.';
+  $('hint').textContent = R.boss ? R.boss.hint + (R.stolen ? ` (${charmById(R.stolen).name} is off.)` : '') : 'Pick spin and speed, drag to move, then swipe up to aim.';
   updateHUD(); renderReadout();
 }
 
 // ---------- Run flow: start, floor map, Pro Shop ----------
 function startRun() {
+  // floors 1–7 each draw a different boss; floor 8 is always The Proprietor
+  const pool = BOSSES.map((b) => b.id);
+  const order = [];
+  while (order.length < RUN_FLOORS - 1 && pool.length) order.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
   Object.assign(R, { floor: 1, station: 0, cash: START_CASH, charms: [], bag: ['house'], ballId: 'house', boss: null,
-    rerollCost: REROLL_BASE, offers: [], cleared: [], totals: { score: 0, strikes: 0, spares: 0 } });
+    bossOrder: order, stolen: null, rerollCost: REROLL_BASE, offers: [], cleared: [], totals: { score: 0, strikes: 0, spares: 0 } });
   setBall('house');
   showMap();
 }
 function showMap() {
   S.mode = 'menu';
-  R.boss = null;
-  $('mapTitle').textContent = `Floor ${R.floor}`;
+  R.boss = null; R.stolen = null;
+  applySpeedCap();
+  $('mapTitle').textContent = `Floor ${R.floor} of ${RUN_FLOORS}`;
   $('mapList').innerHTML = STATIONS.map((d, i) => {
     const state = R.cleared[i] ? 'done' : i === R.station ? 'now' : 'later';
-    const boss = d.key === 'boss' ? BOSSES[(R.floor - 1) % BOSSES.length] : null;
-    return `<li class="${state}">
-      <div class="map-top"><b>${d.name}</b><span>${state === 'done' ? 'Cleared' : 'Target ' + stationTarget(R.floor, i).toLocaleString()}</span></div>
-      ${boss ? `<div class="map-boss"><b>${boss.name}.</b> ${boss.desc}</div>` : ''}
+    const bb = d.key === 'boss' ? bossForFloor(R.floor) : null;
+    return `<li class="${state}${bb && bb.final ? ' final' : ''}">
+      <div class="map-top"><b>${bb && bb.final ? 'Final Boss' : d.name}</b><span>${state === 'done' ? 'Cleared' : 'Target ' + stationTarget(R.floor, i).toLocaleString()}</span></div>
+      ${bb ? `<div class="map-boss"><b>${bb.icon} ${bb.name}.</b> ${bb.desc}</div>` : ''}
       <div class="map-sub">Reward $${d.reward} · +$1 per frame left</div></li>`;
   }).join('');
   $('mapOverlay').classList.remove('hidden');
@@ -583,8 +652,8 @@ const pinMapEls = [];
 })();
 function updateHUD() {
   const def = STATIONS[R.station];
-  $('stationEyebrow').textContent = `Floor ${R.floor} · Station ${R.station + 1}` + (R.boss ? ` · ${R.boss.name}` : '');
-  $('stationName').textContent = def.name;
+  $('stationEyebrow').textContent = `Floor ${R.floor}/${RUN_FLOORS} · ` + (R.boss ? (R.boss.final ? 'Final Boss' : 'Boss Lane') : `Station ${R.station + 1}`);
+  $('stationName').textContent = R.boss ? `${R.boss.icon} ${R.boss.name}` : def.name;
   $('stationName').classList.toggle('boss', !!R.boss);
   $('target').textContent = S.target.toLocaleString();
   $('frame').textContent = `${Math.min(S.frame + 1, S.frames)}/${S.frames}`;
@@ -594,15 +663,20 @@ function updateHUD() {
   $('ballBtn').disabled = S.mode !== 'aim';
   $('progress').style.width = Math.min(100, (S.score / S.target) * 100) + '%';
   const up = new Set(standing().map((p) => p.n));
-  for (let n = 1; n <= 10; n++) pinMapEls[n].classList.toggle('down', !up.has(n));
+  const bolted = new Set(pins.filter((p) => p.bolted).map((p) => p.n));
+  for (let n = 1; n <= 10; n++) {
+    pinMapEls[n].classList.toggle('down', !up.has(n) && !bolted.has(n));
+    pinMapEls[n].classList.toggle('bolted', bolted.has(n));
+  }
   $('cash').textContent = '$' + R.cash;
   const slots = $('charmSlots');
-  const key = R.charms.join(',');
+  const key = R.charms.join(',') + '|' + (R.stolen || '');
   if (slots.dataset.key !== key) {
     slots.dataset.key = key;
     slots.innerHTML = Array.from({ length: CHARM_SLOTS }, (_, i) => {
       const c = charmById(R.charms[i]);
-      return c ? `<button type="button" class="slot" data-id="${c.id}" aria-label="${c.name}: ${c.desc}">${c.icon}</button>` : '<span class="slot empty"></span>';
+      const off = c && c.id === R.stolen;
+      return c ? `<button type="button" class="slot${off ? ' stolen' : ''}" data-id="${c.id}" aria-label="${c.name}: ${c.desc}${off ? ' (disabled by Charm Thief)' : ''}">${c.icon}</button>` : '<span class="slot empty"></span>';
     }).join('');
   }
 }
@@ -679,7 +753,7 @@ function analyzeSwipe(sw) {
   const dt = Math.max(16, tEnd - p0.t);
   const pxms = Math.hypot(b.x - p0.x, b.y - p0.y) / dt;
   const vN = pxms * 1000 / H;
-  const mph = T.swipeSpeed ? Math.max(9, Math.min(25, 9 + vN * 3.3)) : S.speed;
+  const mph = T.swipeSpeed ? Math.max(9, Math.min(boss().maxSpeed || 25, 9 + vN * 3.3)) : S.speed;
   // aim: ray from ball screen position along chord, crossing the arrows
   const bp = proj(ball.x, ball.z);
   const ap = proj(0, ARROW_Z);
@@ -761,7 +835,18 @@ function speedLabel(v) { return `${v} mph · ${v <= 13 ? 'Slow' : v <= 15 ? 'Eas
     host.appendChild(b);
   });
 })();
-function setSpeed(v) {
+// Speed Trap: disable stops above the cap and step down if needed
+function applySpeedCap() {
+  const cap = boss().maxSpeed || Infinity;
+  document.querySelectorAll('.speed-btn').forEach((b) => { b.disabled = +b.dataset.v > cap; });
+  // remember the player's pick so it comes back once the cap lifts
+  const want = S.speedPick || S.speed;
+  const v = want > cap ? SPEED_STOPS.filter((s) => s <= cap).pop() : want;
+  if (v !== S.speed) setSpeed(v, true);
+}
+function setSpeed(v, auto) {
+  if (v > (boss().maxSpeed || Infinity)) return;
+  if (!auto) S.speedPick = v;
   S.speed = v;
   document.querySelectorAll('.speed-btn').forEach((b) => b.classList.toggle('on', +b.dataset.v === v));
   $('speedLabel').textContent = speedLabel(v);
@@ -813,6 +898,18 @@ function update(dt) {
     if (S.timer <= 0) afterResult();
   }
   for (const p of pins) { if (p.down) p.fallT += dt * S.timeScale; p.wobble *= Math.pow(0.08, dt); }
+  // Moving Day: the standing rack sways while you line up, and freezes once the ball is thrown
+  S.clock = (S.clock || 0) + dt;
+  if (boss().moving && S.mode === 'aim') {
+    const off = boss().moving * Math.sin(S.clock * 0.9);
+    const d = off - (S.rackOff || 0);
+    for (const p of pins) if (p.alive && !p.down) { p.x += d; p.sx += d; }
+    S.rackOff = off;
+  }
+  // Fog Machine: lifts once the throw is being scored
+  S.fogA = S.fogA == null ? 1 : S.fogA;
+  const fogTarget = boss().fog && S.mode !== 'result' && S.mode !== 'end' ? 1 : 0;
+  S.fogA += (fogTarget - S.fogA) * Math.min(1, dt * 4);
   // camera
   let target = 0;
   if (S.mode === 'rolling' || S.mode === 'result') target = Math.max(0, Math.min(L - 250, ball.z - 170));
@@ -840,13 +937,18 @@ function pinPath(len, w) {
   for (let i = PIN_PROFILE.length - 1; i >= 0; i--) { const [t, hw] = PIN_PROFILE[i]; ctx.lineTo(-hw * w / 2, -t * len); }
   ctx.closePath();
 }
-function drawPinShape(len, w) {
+const PIN_SKINS = {
+  normal: ['#d8d0c4', '#ffffff', '#b9ad9e', '#d0352c'],
+  heavy: ['#8f8a86', '#c9c4bf', '#6f6a66', '#3a3a3a'],      // Lead Rack / Proprietor
+  bolted: ['#6f7c88', '#e6eef5', '#4b5661', '#ffb02e'],     // Bolted (steel with amber bands)
+};
+function drawPinShape(len, w, skin = PIN_SKINS.normal) {
   pinPath(len, w);
   const g = ctx.createLinearGradient(-w / 2, 0, w / 2, 0);
-  g.addColorStop(0, '#d8d0c4'); g.addColorStop(0.35, '#ffffff'); g.addColorStop(1, '#b9ad9e');
+  g.addColorStop(0, skin[0]); g.addColorStop(0.35, skin[1]); g.addColorStop(1, skin[2]);
   ctx.fillStyle = g; ctx.fill();
   ctx.save(); pinPath(len, w); ctx.clip();
-  ctx.fillStyle = '#d0352c';
+  ctx.fillStyle = skin[3];
   ctx.fillRect(-w, -0.635 * len, w * 2, 0.03 * len);
   ctx.fillRect(-w, -0.695 * len, w * 2, 0.03 * len);
   ctx.restore();
@@ -862,10 +964,11 @@ function drawPin(p) {
   ctx.fillStyle = 'rgba(40,20,5,.28)';
   ctx.beginPath(); ctx.ellipse(b.x + w * 0.2, b.y, w * 0.6, w * 0.22, 0, 0, Math.PI * 2); ctx.fill();
   ctx.translate(b.x, b.y);
+  const skin = p.bolted ? PIN_SKINS.bolted : boss().pinMass ? PIN_SKINS.heavy : PIN_SKINS.normal;
   if (!p.down) {
     const tilt = Math.sin(performance.now() / 32) * p.wobble * 0.22;
     ctx.rotate(tilt);
-    drawPinShape(len, w);
+    drawPinShape(len, w, skin);
   } else {
     const h = proj(p.x + p.fx * 15, p.z + p.fz * 15);
     const vx = h.x - b.x, vy = h.y - b.y;
@@ -873,7 +976,7 @@ function drawPin(p) {
     const ex = vx * k, ey = -len * (1 - k) + vy * k;
     const l = Math.max(w * 0.9, Math.hypot(ex, ey));
     ctx.rotate(Math.atan2(ex, -ey));
-    drawPinShape(l, w);
+    drawPinShape(l, w, skin);
   }
   ctx.restore();
 }
@@ -946,11 +1049,24 @@ function render() {
   // approach (behind foul line)
   if (z0 < 0) strip(-LANE_HALF - GUTTER_W, LANE_HALF + GUTTER_W, z0, 0, '#c99657');
   // oil sheen
-  const oilZ = T.oilFt * 12;
-  const o0 = proj(0, Math.max(0, z0)).y, o1 = proj(0, oilZ).y;
-  const og = ctx.createLinearGradient(0, o0, 0, o1);
-  og.addColorStop(0, 'rgba(255,245,225,.16)'); og.addColorStop(0.75, 'rgba(255,245,225,.08)'); og.addColorStop(1, 'rgba(255,245,225,0)');
-  strip(-LANE_HALF + 3, LANE_HALF - 3, Math.max(0, z0), oilZ, og);
+  const oz = oilZ();
+  if (oz > Math.max(0, z0) + 1) {
+    const o0 = proj(0, Math.max(0, z0)).y, o1 = proj(0, oz).y;
+    const og = ctx.createLinearGradient(0, o0, 0, o1);
+    og.addColorStop(0, 'rgba(255,245,225,.16)'); og.addColorStop(0.75, 'rgba(255,245,225,.08)'); og.addColorStop(1, 'rgba(255,245,225,0)');
+    strip(-LANE_HALF + 3, LANE_HALF - 3, Math.max(0, z0), oz, og);
+  }
+  if (boss().oilFt === 0) strip(-LANE_HALF, LANE_HALF, Math.max(0, z0), PIT, 'rgba(110,45,10,.14)');   // The Burn: scorched dry boards
+  // Wide Gutters: the outer boards become gutter up to the pin deck
+  if (boss().trim) {
+    for (const sgn of [-1, 1]) {
+      const a = sgn * laneEdge(), b = sgn * LANE_HALF;
+      strip(Math.min(a, b), Math.max(a, b), z0, L - 12, '#26262b');
+      const e = proj(a, Math.max(0, z0)), f = proj(a, L - 12);
+      ctx.strokeStyle = 'rgba(226,72,61,.55)'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(f.x, f.y); ctx.stroke();
+    }
+  }
   // light reflections
   for (const z of [160, 360, 560]) {
     if (z < z0) continue;
@@ -1047,6 +1163,14 @@ function render() {
     if (s.ball && ball.done && ball.z > PIT) continue;
     s.f();
   }
+  // Fog Machine: a bank of fog hides everything past the fog line until the throw is scored
+  if (boss().fog && S.fogA > 0.01) {
+    const yF = proj(0, boss().fog).y, yS = proj(0, boss().fog + 70).y;
+    const fg = ctx.createLinearGradient(0, yF, 0, yS);
+    fg.addColorStop(0, 'rgba(96,90,98,0)'); fg.addColorStop(1, `rgba(96,90,98,${S.fogA})`);
+    ctx.fillStyle = fg; ctx.fillRect(0, yS, W, yF - yS);
+    ctx.fillStyle = `rgba(96,90,98,${S.fogA})`; ctx.fillRect(0, 0, W, Math.max(0, yS));
+  }
 }
 
 // ---------- Loop ----------
@@ -1084,6 +1208,15 @@ window.__run = R;
 // QA helpers: grant a charm / ball / cash without the shop
 window.__give = (id) => { if (charmById(id) && !R.charms.includes(id)) R.charms.push(id); else if (BALLS[id] && !R.bag.includes(id)) { R.bag.push(id); setBall(id); } updateHUD(); };
 window.__cash = (n) => { R.cash += n; updateHUD(); };
+// jump to floor n's map, optionally forcing its boss: __floor(3, 'fog') or __floor(8)
+window.__floor = (n, bossId) => {
+  ['mapOverlay', 'endOverlay', 'shopOverlay', 'startOverlay'].forEach((id) => $(id).classList.add('hidden'));
+  R.floor = n; R.station = 0; R.cleared = [];
+  if (bossId) R.bossOrder[n - 1] = bossId;
+  showMap();
+};
+// jump straight onto floor n's boss lane
+window.__bossLane = (n, bossId) => { window.__floor(n, bossId); R.station = 2; $('mapOverlay').classList.add('hidden'); newStation(); };
 
 // ---------- Boot ----------
 makeRack(); resetBall(); setBall('house'); updateHUD();
