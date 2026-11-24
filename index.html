@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Ccircle cx=%2216%22 cy=%2216%22 r=%2214%22 fill=%22%231f4fb8%22/%3E%3C/svg%3E" />
+<title>Gutter Run — Prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bowlby+One&family=Barlow+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div id="app">
+  <canvas id="lane"></canvas>
+
+  <header class="board" id="board">
+    <div class="board-row">
+      <div class="station">
+        <span class="eyebrow">Floor 1 · Station 1</span>
+        <span class="station-name">Open Lane</span>
+      </div>
+      <div class="pin-map" id="pinMap" aria-label="Standing pins"></div>
+    </div>
+    <div class="board-row stats">
+      <div class="stat"><span class="eyebrow">Score</span><span class="num" id="score">0</span></div>
+      <div class="stat"><span class="eyebrow">Target</span><span class="num" id="target">750</span></div>
+      <div class="stat"><span class="eyebrow">Frame</span><span class="num" id="frame">1/5</span></div>
+      <div class="stat"><span class="eyebrow">Ball</span><span class="num" id="ballNo">1</span></div>
+    </div>
+    <div class="progress"><div class="progress-fill" id="progress"></div></div>
+  </header>
+
+  <div class="popup" id="popup" aria-live="polite">
+    <div class="popup-title" id="popupTitle"></div>
+    <div class="popup-math" id="popupMath"></div>
+  </div>
+
+  <div class="readout" id="readout"></div>
+
+  <footer class="controls" id="controls">
+    <div class="hint" id="hint">Drag to move. Swipe up toward the arrows. Curve your swipe to hook.</div>
+    <div class="control-row">
+      <div class="slider" id="slider" role="slider" aria-label="Ball position" aria-valuemin="1" aria-valuemax="39" tabindex="0">
+        <div class="slider-track">
+          <span class="slider-label">Move</span>
+          <div class="slider-knob" id="knob"></div>
+        </div>
+      </div>
+      <button class="btn" id="rerackBtn" type="button">Re-rack <span id="rerackCount">2</span></button>
+      <button class="btn icon" id="tuneBtn" type="button" aria-label="Tuning">⚙</button>
+    </div>
+  </footer>
+
+  <div class="overlay" id="startOverlay">
+    <div class="card">
+      <div class="logo">Gutter<br />Run</div>
+      <p class="tag">Prototype v0.1 · Throw feel test</p>
+      <ul class="howto">
+        <li><b>Move</b> by dragging the bar at the bottom.</li>
+        <li><b>Throw</b> by swiping up on the lane toward the arrows.</li>
+        <li><b>Hook</b> by curving your swipe. Bulge right to hook left.</li>
+        <li><b>Swipe faster</b> for more speed. Slower balls hook more.</li>
+      </ul>
+      <p class="goal">Score <b>750</b> in 5 frames. Score = Pins × Mult.<br />Strike ×4 · Spare ×3 · Split pickup ×5 · Turkey ×8</p>
+      <button class="btn primary" id="startBtn" type="button">Bowl</button>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="endOverlay">
+    <div class="card">
+      <div class="end-title" id="endTitle">Station Cleared</div>
+      <div class="end-score"><span id="endScore">0</span><small> / <span id="endTarget">750</span></small></div>
+      <div class="end-stats" id="endStats"></div>
+      <button class="btn primary" id="againBtn" type="button">Bowl Again</button>
+    </div>
+  </div>
+
+  <div class="tune hidden" id="tunePanel">
+    <div class="tune-head"><b>Tuning</b><button class="btn small" id="tuneClose" type="button">Done</button></div>
+    <div id="tuneBody"></div>
+    <button class="btn small wide" id="resetRackBtn" type="button">Reset pins (practice)</button>
+  </div>
+</div>
+<script src="game.js"></script>
+</body>
+</html>
