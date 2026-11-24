@@ -33,7 +33,7 @@ const TUNE_DEFS = [
   ['guide', 'Aim guide (0 off / 1 on)', 0, 1, 1],
 ];
 
-const STATION = { target: 750, frames: 5, reracks: 2 };
+const STATION = { target: 1200, frames: 5, reracks: 2 };
 
 // ---------- DOM ----------
 const $ = (id) => document.getElementById(id);
