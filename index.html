@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Ccircle cx=%2216%22 cy=%2216%22 r=%2214%22 fill=%22%231f4fb8%22/%3E%3C/svg%3E" />
-<title>Gutter Run — Prototype</title>
+<title>Gutter Run</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Bowlby+One&family=Barlow+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet" />
@@ -17,8 +17,8 @@
   <header class="board" id="board">
     <div class="board-row">
       <div class="station">
-        <span class="eyebrow">Floor 1 · Station 1</span>
-        <span class="station-name">Open Lane</span>
+        <span class="eyebrow" id="stationEyebrow">Floor 1 · Station 1</span>
+        <span class="station-name" id="stationName">Open Lane</span>
       </div>
       <div class="pin-map" id="pinMap" aria-label="Standing pins"></div>
     </div>
@@ -29,11 +29,16 @@
       <div class="stat"><span class="eyebrow">Ball</span><span class="num" id="ballNo">1</span></div>
     </div>
     <div class="progress"><div class="progress-fill" id="progress"></div></div>
+    <div class="board-row charms-row">
+      <div class="charm-slots" id="charmSlots" aria-label="Charms"></div>
+      <span class="cash" id="cash" aria-label="Cash">$4</span>
+    </div>
   </header>
 
   <div class="popup" id="popup" aria-live="polite">
     <div class="popup-title" id="popupTitle"></div>
     <div class="popup-math" id="popupMath"></div>
+    <div class="popup-charms" id="popupCharms"></div>
   </div>
 
   <div class="readout" id="readout"></div>
@@ -51,6 +56,7 @@
           <div class="slider-knob" id="knob"></div>
         </div>
       </div>
+      <button class="btn icon ball-btn" id="ballBtn" type="button" aria-label="Ball"><i></i></button>
       <button class="btn" id="rerackBtn" type="button">Re-rack <span id="rerackCount">2</span></button>
       <button class="btn icon" id="tuneBtn" type="button" aria-label="Tuning">⚙</button>
     </div>
@@ -59,15 +65,23 @@
   <div class="overlay" id="startOverlay">
     <div class="card">
       <div class="logo">Gutter<br />Run</div>
-      <p class="tag">Prototype v0.1 · Throw feel test</p>
+      <p class="tag">Prototype v0.2 · Floor 1 run</p>
       <ul class="howto">
         <li><b>Move</b> by dragging the bar at the bottom.</li>
         <li><b>Throw</b> by swiping up on the lane toward the arrows.</li>
         <li><b>Spin</b> by tapping a curve button. The dotted line shows where the ball will hook.</li>
-        <li><b>Swipe faster</b> for more speed. Slower balls hook more.</li>
+        <li><b>Clear 3 stations</b> to finish the floor. Spend cash on charms and balls in the Pro Shop between them.</li>
       </ul>
-      <p class="goal">Score <b>1,200</b> in 5 frames. Score = Pins × Mult.<br />Strike ×4 · Spare ×3 · Split pickup ×5 · Turkey ×8</p>
-      <button class="btn primary" id="startBtn" type="button">Bowl</button>
+      <p class="goal">Score = Pins × Mult.<br />Strike ×4 · Spare ×3 · Split pickup ×5 · Turkey ×8</p>
+      <button class="btn primary" id="startBtn" type="button">Start Run</button>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="mapOverlay">
+    <div class="card">
+      <div class="end-title" id="mapTitle">Floor 1</div>
+      <ol class="map-list" id="mapList"></ol>
+      <button class="btn primary" id="mapGo" type="button">Bowl</button>
     </div>
   </div>
 
@@ -76,7 +90,19 @@
       <div class="end-title" id="endTitle">Station Cleared</div>
       <div class="end-score"><span id="endScore">0</span><small> / <span id="endTarget">1,200</span></small></div>
       <div class="end-stats" id="endStats"></div>
-      <button class="btn primary" id="againBtn" type="button">Bowl Again</button>
+      <div id="endCash"></div>
+      <button class="btn primary" id="againBtn" type="button">Pro Shop</button>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="shopOverlay">
+    <div class="card shop">
+      <div class="shop-head"><span class="end-title">Pro Shop</span><span class="cash big" id="shopCash">$0</span></div>
+      <div class="shop-offers" id="shopOffers"></div>
+      <button class="btn small wide" id="rerollBtn" type="button">Reroll $5</button>
+      <span class="eyebrow shop-sub">Your charms</span>
+      <div class="shop-owned" id="shopOwned"></div>
+      <button class="btn primary" id="shopNext" type="button">Next Station</button>
     </div>
   </div>
 

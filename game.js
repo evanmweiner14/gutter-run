@@ -1,4 +1,4 @@
-/* Gutter Run — Phase 0 prototype
+/* Gutter Run — Phase 1: Floor 1 run (3 stations, Pro Shop, charms, balls, boss lane)
    World units: inches. x = lateral (0 = lane center, + = right as seen by bowler).
    z = distance down the lane from the foul line (0) toward the pins (+). */
 (() => {
@@ -34,7 +34,64 @@ const TUNE_DEFS = [
   ['swipeSpin', 'Swipe curve adds spin (0 off / 1 on)', 0, 1, 1],
 ];
 
-const STATION = { target: 1200, frames: 5, reracks: 2 };
+// ---------- Run structure ----------
+const RUN_FLOORS = 1;              // Phase 1 = one full floor; raise when more bosses exist
+const STATIONS = [
+  { key: 'open', name: 'Open Lane', tmult: 1, reward: 3 },
+  { key: 'league', name: 'League Night', tmult: 1.35, reward: 4 },
+  { key: 'boss', name: 'Boss Lane', tmult: 1.75, reward: 5 },
+];
+const BASE_TARGET = 900, FLOOR_GROWTH = 1.8;
+const BASE_FRAMES = 5, BASE_RERACKS = 2, CHARM_SLOTS = 5, BAG_SLOTS = 3, START_CASH = 4, REROLL_BASE = 5;
+function stationTarget(floor, idx) {
+  return Math.round(BASE_TARGET * Math.pow(FLOOR_GROWTH, floor - 1) * STATIONS[idx].tmult / 50) * 50;
+}
+
+// ---------- Content (data-driven) ----------
+const BALLS = {
+  house: { id: 'house', name: 'House Ball', desc: 'Balanced and reliable.', mass: 15, hook: 1, price: 0,
+    colors: ['#7fb6ff', '#2459c4', '#122c74', '#081538'], swirl: 'rgba(160,120,255,.35)' },
+  resin: { id: 'resin', name: 'Reactive Resin', desc: 'Hooks 60% harder once it reaches the dry back end.', mass: 15, hook: 1.6, price: 6,
+    colors: ['#ff9bf0', '#b02ab8', '#5c0f6b', '#2a0533'], swirl: 'rgba(255,200,120,.35)' },
+  urethane: { id: 'urethane', name: 'Heavy Urethane', desc: 'Heavier, so it drives through the rack. Hooks a little less.', mass: 19, hook: 0.8, price: 6,
+    colors: ['#ffc38a', '#d4541c', '#7a2108', '#3a0d02'], swirl: 'rgba(255,240,200,.3)' },
+};
+
+const BOSSES = [
+  { id: 'tilt', name: 'The Tilt', desc: 'The lane slopes left. Every ball drifts toward the left gutter.', hint: 'The Tilt: the lane slopes left. Aim right.', tilt: -6 },
+];
+
+// Charms subscribe to events. score(c) gets the roll context { type, strike, streak, knocked, domino,
+// lastFrame, pins, mult } and returns true when it changed something. stationStart(st) can edit { frames, reracks }.
+const CHARMS = [
+  { id: 'sock', name: 'Lucky Sock', icon: '🧦', price: 5, desc: 'Strikes give +4 Mult.',
+    score(c) { if (c.strike) { c.mult += 4; return true; } } },
+  { id: 'hot', name: 'Hot Hand', icon: '🔥', price: 6, desc: 'Strikes give +2 Mult for every strike in a row.',
+    score(c) { if (c.strike) { c.mult += 2 * c.streak; return true; } } },
+  { id: 'punk', name: 'Gutter Punk', icon: '🤘', price: 4, desc: 'Gutter balls score +20 Pins at ×2 Mult instead of nothing.',
+    score(c) { if (c.type === 'gutter') { c.pins += 20; c.mult = 2; return true; } } },
+  { id: 'savant', name: 'Seven-Ten Savant', icon: '🎯', price: 6, desc: 'Split pickups give ×2 Mult.',
+    score(c) { if (c.type === 'split') { c.mult *= 2; return true; } } },
+  { id: 'domino', name: 'Domino Effect', icon: '💥', price: 5, desc: '+5 Pins for each pin knocked down by another pin instead of the ball.',
+    score(c) { if (c.domino > 0) { c.pins += 5 * c.domino; return true; } } },
+  { id: 'lastcall', name: 'Last Call', icon: '🍺', price: 5, desc: 'Every roll in your final frame gets ×3 Mult.',
+    score(c) { if (c.lastFrame && c.mult > 0) { c.mult *= 3; return true; } } },
+  { id: 'shoes', name: 'Bowling Shoes', icon: '👟', price: 6, desc: '+1 frame at every station.',
+    stationStart(st) { st.frames += 1; return true; } },
+  { id: 'spare', name: 'Spare Parts', icon: '🔧', price: 4, desc: '+1 re-rack at every station.',
+    stationStart(st) { st.reracks += 1; return true; } },
+];
+const charmById = (id) => CHARMS.find((c) => c.id === id);
+
+// Run state (persists across stations)
+const R = { floor: 1, station: 0, cash: START_CASH, charms: [], bag: ['house'], ballId: 'house', boss: null,
+  rerollCost: REROLL_BASE, offers: [], cleared: [], totals: { score: 0, strikes: 0, spares: 0 } };
+const curBall = () => BALLS[R.ballId];
+function fire(event, ctx) {
+  const fired = [];
+  for (const id of R.charms) { const ch = charmById(id); if (ch[event] && ch[event](ctx)) fired.push(ch); }
+  return fired;
+}
 
 // ---------- DOM ----------
 const $ = (id) => document.getElementById(id);
@@ -48,7 +105,7 @@ const S = {
   timer: 0,
   score: 0, shownScore: 0,
   frame: 0, ballInFrame: 1,
-  reracks: STATION.reracks,
+  reracks: BASE_RERACKS, frames: BASE_FRAMES, target: BASE_TARGET,
   strikeStreak: 0,
   wasSplit: false,
   rollTime: 0,
@@ -143,6 +200,7 @@ function collide(a, b, e, isBallPin) {
   if (d2 >= rr * rr || d2 === 0) return;
   const d = Math.sqrt(d2), nx = dx / d, nz = dz / d;
   const pen = rr - d;
+  if (isBallPin) b.ballHit = true;
   const ia = 1 / a.m, ib = 1 / b.m;
   a.x -= nx * pen * ia / (ia + ib); a.z -= nz * pen * ia / (ia + ib);
   b.x += nx * pen * ib / (ia + ib); b.z += nz * pen * ib / (ia + ib);
@@ -161,9 +219,10 @@ function rollKinematics(b, dt, oilZ) {
   const v = Math.hypot(b.vx, b.vz);
   const dry = b.z > oilZ ? 1 : 0.1;
   const slowBoost = Math.max(0.75, Math.min(1.6, 300 / v));
-  const a = 40 * T.hook * b.spin * dry * slowBoost * (b.z < L + 10 ? 1 : 0.3);
+  const a = 40 * T.hook * curBall().hook * b.spin * dry * slowBoost * (b.z < L + 10 ? 1 : 0.3);
   // positive spin pushes the ball toward -x (hooks left)
   b.vx += (-b.vz / v) * a * dt;
+  if (R.boss && R.boss.tilt && b.z < L) b.vx += R.boss.tilt * dt;
   const dec = 10 * dt;
   b.vx -= (b.vx / v) * dec; b.vz -= (b.vz / v) * dec;
 }
@@ -245,7 +304,8 @@ function launch(targetX, mph, spin) {
   S.lastAng = ang;
   const v = mph * MPH;
   ball.vx = v * Math.sin(ang); ball.vz = v * Math.cos(ang);
-  ball.spin = spin; ball.active = true; ball.gutter = false; ball.done = false;
+  ball.spin = spin; ball.active = true; ball.gutter = false; ball.done = false; ball.m = curBall().mass;
+  for (const p of pins) p.ballHit = false;
   S.mode = 'rolling'; S.rollTime = 0; S.firstContact = false;
   standingBefore = standing().map((p) => p.n);
   const boardAt = (x) => Math.round((LANE_HALF - x) / BOARD + 0.5);
@@ -272,51 +332,56 @@ function isSplit(standNums) {
 
 function evaluateRoll() {
   const now = standing().map((p) => p.n);
-  const knocked = standingBefore.filter((n) => !now.includes(n)).length;
+  const knockedNums = standingBefore.filter((n) => !now.includes(n));
+  const knocked = knockedNums.length;
+  const domino = pins.filter((p) => knockedNums.includes(p.n) && !p.ballHit).length;
   const fresh = standingBefore.length === 10 && S.ballInFrame === 1;
-  let title, bonus = 0, mult = 1, cls = '';
+  let title, bonus = 0, mult = 1, cls = '', type = 'open';
   let frameOver = false;
+  const missType = () => { type = ball.gutter ? 'gutter' : 'miss'; title = ball.gutter ? 'GUTTER' : 'MISS'; mult = ball.gutter ? 0 : 1; cls = 'red'; if (ball.gutter) S.stats.gutters++; };
   if (S.ballInFrame === 1) {
     if (now.length === 0 && fresh) {
       S.strikeStreak++; S.stats.strikes++;
-      if (S.strikeStreak >= 3) { title = 'TURKEY!'; bonus = 100; mult = 8; }
-      else { title = 'STRIKE!'; bonus = 50; mult = 4; }
+      if (S.strikeStreak >= 3) { title = 'TURKEY!'; bonus = 100; mult = 8; type = 'turkey'; }
+      else { title = 'STRIKE!'; bonus = 50; mult = 4; type = 'strike'; }
       frameOver = true;
     } else {
       S.strikeStreak = 0;
       const backDown = [7, 8, 9, 10].every((n) => !now.includes(n));
       S.wasSplit = isSplit(now);
-      if (knocked === 0) { title = ball.gutter ? 'GUTTER' : 'MISS'; mult = ball.gutter ? 0 : 1; cls = 'red'; if (ball.gutter) S.stats.gutters++; }
-      else if (backDown) { title = 'CLEAN BACK ROW'; bonus = 20; mult = 2; cls = 'small'; }
+      if (knocked === 0) missType();
+      else if (backDown) { title = 'CLEAN BACK ROW'; bonus = 20; mult = 2; cls = 'small'; type = 'backrow'; }
       else if (S.wasSplit) { title = 'SPLIT!'; cls = 'red'; S.stats.splits++; }
       else { title = `${knocked} PIN${knocked === 1 ? '' : 'S'}`; cls = 'small'; }
       S.ballInFrame = 2;
     }
   } else {
     if (now.length === 0) {
-      if (S.wasSplit) { title = 'SPLIT PICKUP!'; bonus = 60; mult = 5; }
-      else { title = 'SPARE!'; bonus = 30; mult = 3; }
+      if (S.wasSplit) { title = 'SPLIT PICKUP!'; bonus = 60; mult = 5; type = 'split'; }
+      else { title = 'SPARE!'; bonus = 30; mult = 3; type = 'spare'; }
       S.stats.spares++;
-    } else if (knocked === 0) { title = ball.gutter ? 'GUTTER' : 'MISS'; mult = ball.gutter ? 0 : 1; cls = 'red'; if (ball.gutter) S.stats.gutters++; }
+    } else if (knocked === 0) missType();
     else { title = `${knocked} PIN${knocked === 1 ? '' : 'S'}`; cls = 'small'; }
     S.strikeStreak = 0;
     frameOver = true;
   }
-  const pinsVal = knocked * 10 + bonus;
-  const total = pinsVal * mult;
+  const c = { type, strike: type === 'strike' || type === 'turkey', streak: S.strikeStreak, knocked, domino,
+    lastFrame: S.frame === S.frames - 1, pins: knocked * 10 + bonus, mult };
+  const fired = fire('score', c);
+  const pinsVal = c.pins, total = Math.round(c.pins * c.mult);
   S.score += total;
   S.stats.best = Math.max(S.stats.best, total);
-  showPopup(title, cls, pinsVal, mult, total);
+  showPopup(title, cls, pinsVal, +c.mult.toFixed(2), total, fired);
   S.pendingFrameOver = frameOver;
   S.mode = 'result'; S.timer = 1.6;
 }
 
 function afterResult() {
   hidePopup();
-  if (S.score >= STATION.target) return endStation(true);
+  if (S.score >= S.target) return endStation(true);
   if (S.pendingFrameOver) {
     S.frame++;
-    if (S.frame >= STATION.frames) return endStation(false);
+    if (S.frame >= S.frames) return endStation(false);
     S.ballInFrame = 1; S.wasSplit = false;
     makeRack();
   } else {
@@ -329,30 +394,174 @@ function afterResult() {
   updateHUD();
 }
 
+let endAction = null;
 function endStation(won) {
   S.mode = 'end';
-  const left = STATION.frames - S.frame - (S.pendingFrameOver ? 1 : 0);
-  $('endTitle').textContent = won ? 'Station Cleared' : 'Out of Frames';
+  const left = Math.max(0, S.frames - S.frame - (S.pendingFrameOver ? 1 : 0));
+  const st = S.stats, def = STATIONS[R.station];
+  R.totals.score += S.score; R.totals.strikes += st.strikes; R.totals.spares += st.spares;
+  const finalStation = R.station === STATIONS.length - 1 && R.floor >= RUN_FLOORS;
+  let rows = [['Strikes', st.strikes], ['Spares', st.spares], ['Splits', st.splits], ['Best roll', st.best.toLocaleString()]];
+  let cashHtml = '';
+  if (won) {
+    const interest = Math.min(5, Math.floor(R.cash / 5));
+    const earned = def.reward + left + interest;
+    cashHtml = `<div class="cash-lines">
+      <div><span>${def.name} cleared</span><b>$${def.reward}</b></div>
+      <div><span>Frames left (${left} × $1)</span><b>$${left}</b></div>
+      <div><span>Interest ($1 per $5 held, max $5)</span><b>$${interest}</b></div>
+      <div class="sum"><span>Cash</span><b>$${R.cash} → $${R.cash + earned}</b></div></div>`;
+    R.cash += earned;
+    R.cleared[R.station] = true;
+  }
+  if (won && finalStation) {
+    $('endTitle').textContent = 'Run Complete!';
+    rows = [['Run score', R.totals.score.toLocaleString()], ['Strikes', R.totals.strikes], ['Spares', R.totals.spares], ['Cash left', '$' + R.cash]];
+    cashHtml = `<p class="end-note">You beat ${R.boss ? R.boss.name : 'the boss'} and cleared Floor ${R.floor}. More floors arrive in Phase 2.</p>`;
+    $('againBtn').textContent = 'New Run'; endAction = startRun;
+  } else if (won) {
+    $('endTitle').textContent = R.station === STATIONS.length - 1 ? 'Boss Beaten!' : 'Station Cleared';
+    $('againBtn').textContent = 'Pro Shop'; endAction = openShop;
+  } else {
+    $('endTitle').textContent = 'Run Over';
+    rows = [['Reached', `Floor ${R.floor} · ${def.name}`], ['Run score', (R.totals.score).toLocaleString()], ['Strikes', R.totals.strikes], ['Spares', R.totals.spares]];
+    cashHtml = `<p class="end-note">Out of frames, ${(S.target - S.score).toLocaleString()} short of the target.</p>`;
+    $('againBtn').textContent = 'New Run'; endAction = startRun;
+  }
   $('endTitle').classList.toggle('fail', !won);
   $('endScore').textContent = S.score.toLocaleString();
-  $('endTarget').textContent = STATION.target.toLocaleString();
-  const st = S.stats;
-  $('endStats').innerHTML = [
-    ['Strikes', st.strikes], ['Spares', st.spares], ['Splits', st.splits], ['Best roll', st.best.toLocaleString()],
-    ...(won ? [['Frames left', Math.max(0, left)], ['Cash earned', '$' + (3 + Math.max(0, left))]] : []),
-  ].map(([k, v]) => `<div><b>${v}</b><span>${k}</span></div>`).join('');
+  $('endTarget').textContent = S.target.toLocaleString();
+  $('endStats').innerHTML = rows.map(([k, v]) => `<div><b>${v}</b><span>${k}</span></div>`).join('');
+  $('endCash').innerHTML = cashHtml;
   $('endOverlay').classList.remove('hidden');
   updateHUD();
 }
 
 function newStation() {
-  Object.assign(S, { score: 0, shownScore: 0, frame: 0, ballInFrame: 1, reracks: STATION.reracks, strikeStreak: 0, wasSplit: false,
+  const def = STATIONS[R.station];
+  R.boss = def.key === 'boss' ? BOSSES[(R.floor - 1) % BOSSES.length] : null;
+  const st = { frames: BASE_FRAMES, reracks: BASE_RERACKS };
+  fire('stationStart', st);
+  Object.assign(S, { score: 0, shownScore: 0, frame: 0, ballInFrame: 1, reracks: st.reracks, frames: st.frames,
+    target: stationTarget(R.floor, R.station), strikeStreak: 0, wasSplit: false,
     stats: { strikes: 0, spares: 0, splits: 0, gutters: 0, best: 0 }, lastThrow: null });
   makeRack(); resetBall(); cam.z = 0;
   S.mode = 'aim';
-  $('hint').textContent = 'Pick a spin, drag to move, then swipe up toward the arrows.';
+  $('hint').textContent = R.boss ? R.boss.hint :'Pick a spin, drag to move, then swipe up toward the arrows.';
   updateHUD(); renderReadout();
 }
+
+// ---------- Run flow: start, floor map, Pro Shop ----------
+function startRun() {
+  Object.assign(R, { floor: 1, station: 0, cash: START_CASH, charms: [], bag: ['house'], ballId: 'house', boss: null,
+    rerollCost: REROLL_BASE, offers: [], cleared: [], totals: { score: 0, strikes: 0, spares: 0 } });
+  setBall('house');
+  showMap();
+}
+function showMap() {
+  S.mode = 'menu';
+  R.boss = null;
+  $('mapTitle').textContent = `Floor ${R.floor}`;
+  $('mapList').innerHTML = STATIONS.map((d, i) => {
+    const state = R.cleared[i] ? 'done' : i === R.station ? 'now' : 'later';
+    const boss = d.key === 'boss' ? BOSSES[(R.floor - 1) % BOSSES.length] : null;
+    return `<li class="${state}">
+      <div class="map-top"><b>${d.name}</b><span>${state === 'done' ? 'Cleared' : 'Target ' + stationTarget(R.floor, i).toLocaleString()}</span></div>
+      ${boss ? `<div class="map-boss"><b>${boss.name}.</b> ${boss.desc}</div>` : ''}
+      <div class="map-sub">Reward $${d.reward} · +$1 per frame left</div></li>`;
+  }).join('');
+  $('mapOverlay').classList.remove('hidden');
+  updateHUD();
+}
+function openShop() {
+  S.mode = 'menu';
+  R.rerollCost = REROLL_BASE;
+  rollOffers(true);
+  $('shopOverlay').classList.remove('hidden');
+  renderShop();
+}
+function pickCharms(n) {
+  const pool = CHARMS.filter((c) => !R.charms.includes(c.id));
+  const out = [];
+  while (out.length < n && pool.length) out.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0].id);
+  return out;
+}
+function rollOffers(withBall) {
+  const ballsLeft = Object.keys(BALLS).filter((id) => !R.bag.includes(id));
+  const oldBall = R.offers.find((o) => o.kind === 'ball' && !o.sold);
+  const ballOffer = withBall ? (ballsLeft.length ? { kind: 'ball', id: ballsLeft[Math.floor(Math.random() * ballsLeft.length)] } : null) : oldBall || null;
+  const charmIds = pickCharms(ballOffer ? 2 : 3);
+  R.offers = charmIds.map((id) => ({ kind: 'charm', id }));
+  if (ballOffer) R.offers.push(ballOffer);
+}
+function offerInfo(o) {
+  if (o.kind === 'charm') { const c = charmById(o.id); return { icon: c.icon, name: c.name, desc: c.desc, price: c.price, tag: 'Charm' }; }
+  const b = BALLS[o.id]; return { icon: '', ball: b, name: b.name, desc: b.desc, price: b.price, tag: 'Ball' };
+}
+function renderShop() {
+  $('shopCash').textContent = '$' + R.cash;
+  $('shopOffers').innerHTML = R.offers.map((o, i) => {
+    const f = offerInfo(o);
+    const full = o.kind === 'charm' ? R.charms.length >= CHARM_SLOTS : R.bag.length >= BAG_SLOTS;
+    const label = o.sold ? 'Sold' : full ? (o.kind === 'charm' ? 'Slots full' : 'Bag full') : `Buy $${f.price}`;
+    const icon = f.ball ? `<i class="ball-dot" style="background:${ballGradient(f.ball)}"></i>` : `<i class="charm-icon">${f.icon}</i>`;
+    return `<div class="offer${o.sold ? ' sold' : ''}">${icon}<div class="offer-text"><span class="eyebrow">${f.tag}</span><b>${f.name}</b><p>${f.desc}</p></div>
+      <button class="btn small buy" data-i="${i}" type="button" ${o.sold || full || R.cash < f.price ? 'disabled' : ''}>${label}</button></div>`;
+  }).join('') || '<p class="end-note">Sold out.</p>';
+  $('shopOwned').innerHTML = R.charms.length
+    ? R.charms.map((id) => { const c = charmById(id); return `<div class="owned"><i class="charm-icon">${c.icon}</i><div class="offer-text"><b>${c.name}</b><p>${c.desc}</p></div><button class="btn small sell" data-id="${id}" type="button">Sell $${sellPrice(c)}</button></div>`; }).join('')
+    : '<p class="end-note">No charms yet. You have room for 5.</p>';
+  $('rerollBtn').textContent = `Reroll $${R.rerollCost}`;
+  $('rerollBtn').disabled = R.cash < R.rerollCost;
+  updateHUD();
+}
+const sellPrice = (c) => Math.max(1, Math.floor(c.price / 2));
+$('shopOffers').addEventListener('click', (e) => {
+  const btn = e.target.closest('.buy'); if (!btn || btn.disabled) return;
+  const o = R.offers[+btn.dataset.i], f = offerInfo(o);
+  if (o.sold || R.cash < f.price) return;
+  if (o.kind === 'charm') { if (R.charms.length >= CHARM_SLOTS) return; R.charms.push(o.id); }
+  else { if (R.bag.length >= BAG_SLOTS) return; R.bag.push(o.id); setBall(o.id); }
+  R.cash -= f.price; o.sold = true;
+  renderShop();
+});
+$('shopOwned').addEventListener('click', (e) => {
+  const btn = e.target.closest('.sell'); if (!btn) return;
+  const c = charmById(btn.dataset.id);
+  R.charms = R.charms.filter((id) => id !== c.id); R.cash += sellPrice(c);
+  renderShop();
+});
+$('rerollBtn').addEventListener('click', () => {
+  if (R.cash < R.rerollCost) return;
+  R.cash -= R.rerollCost; R.rerollCost++;
+  rollOffers(false);
+  renderShop();
+});
+$('shopNext').addEventListener('click', () => {
+  $('shopOverlay').classList.add('hidden');
+  R.station++;
+  if (R.station >= STATIONS.length) { R.station = 0; R.floor++; R.cleared = []; }
+  showMap();
+});
+$('mapGo').addEventListener('click', () => { initAudio(); $('mapOverlay').classList.add('hidden'); newStation(); });
+
+// ---------- Balls ----------
+function ballGradient(b) { return `radial-gradient(circle at 35% 30%, ${b.colors[0]}, ${b.colors[1]} 55%, ${b.colors[3]})`; }
+function setBall(id) {
+  R.ballId = id;
+  const b = curBall();
+  $('knob').style.background = ballGradient(b);
+  $('ballBtn').style.setProperty('--ball', ballGradient(b));
+  $('ballBtn').setAttribute('aria-label', `Ball: ${b.name}. Tap to switch.`);
+  renderReadout();
+}
+$('ballBtn').addEventListener('click', () => {
+  if (S.mode !== 'aim') return;
+  if (R.bag.length < 2) { $('hint').textContent = `${curBall().name}. Buy more balls in the Pro Shop.`; return; }
+  const i = R.bag.indexOf(R.ballId);
+  setBall(R.bag[(i + 1) % R.bag.length]);
+  $('hint').textContent = `${curBall().name}: ${curBall().desc}`;
+});
 
 function resetBall() {
   Object.assign(ball, { z: 10, vx: 0, vz: 0, spin: 0, active: false, gutter: false, done: false });
@@ -371,27 +580,56 @@ const pinMapEls = [];
   }
 })();
 function updateHUD() {
-  $('target').textContent = STATION.target.toLocaleString();
-  $('frame').textContent = `${Math.min(S.frame + 1, STATION.frames)}/${STATION.frames}`;
+  const def = STATIONS[R.station];
+  $('stationEyebrow').textContent = `Floor ${R.floor} · Station ${R.station + 1}` + (R.boss ? ` · ${R.boss.name}` : '');
+  $('stationName').textContent = def.name;
+  $('stationName').classList.toggle('boss', !!R.boss);
+  $('target').textContent = S.target.toLocaleString();
+  $('frame').textContent = `${Math.min(S.frame + 1, S.frames)}/${S.frames}`;
   $('ballNo').textContent = S.ballInFrame;
   $('rerackCount').textContent = S.reracks;
   $('rerackBtn').disabled = !(S.mode === 'aim' && S.ballInFrame === 2 && S.reracks > 0);
-  $('progress').style.width = Math.min(100, (S.score / STATION.target) * 100) + '%';
+  $('ballBtn').disabled = S.mode !== 'aim';
+  $('progress').style.width = Math.min(100, (S.score / S.target) * 100) + '%';
   const up = new Set(standing().map((p) => p.n));
   for (let n = 1; n <= 10; n++) pinMapEls[n].classList.toggle('down', !up.has(n));
+  $('cash').textContent = '$' + R.cash;
+  const slots = $('charmSlots');
+  const key = R.charms.join(',');
+  if (slots.dataset.key !== key) {
+    slots.dataset.key = key;
+    slots.innerHTML = Array.from({ length: CHARM_SLOTS }, (_, i) => {
+      const c = charmById(R.charms[i]);
+      return c ? `<button type="button" class="slot" data-id="${c.id}" aria-label="${c.name}: ${c.desc}">${c.icon}</button>` : '<span class="slot empty"></span>';
+    }).join('');
+  }
+}
+$('charmSlots').addEventListener('click', (e) => {
+  const b = e.target.closest('.slot[data-id]'); if (!b) return;
+  const c = charmById(b.dataset.id);
+  $('hint').innerHTML = `<b>${c.name}</b>: ${c.desc}`;
+});
+function flashCharms(fired) {
+  for (const ch of fired) {
+    const el = document.querySelector(`.slot[data-id="${ch.id}"]`);
+    if (!el) continue;
+    el.classList.remove('fired'); void el.offsetWidth; el.classList.add('fired');
+  }
 }
 function renderReadout() {
   const b = Math.round((LANE_HALF - S.aimX) / BOARD + 0.5);
   const t = S.lastThrow;
-  $('readout').innerHTML = `Standing on <b>board ${b}</b>` + (t
+  $('readout').innerHTML = `${curBall().name} · <b>board ${b}</b>` + (t
     ? `<br>Last: <b>${t.mph} mph</b> · <b>${spinLabel(t.spin)}</b><br>Board ${t.startBoard} → ${t.arrowBoard} at arrows`
     : '');
 }
 let popupT = null;
-function showPopup(title, cls, pinsVal, mult, total) {
+function showPopup(title, cls, pinsVal, mult, total, fired = []) {
   const el = $('popupTitle');
   el.textContent = title; el.className = 'popup-title ' + cls;
   $('popupMath').innerHTML = `<span class="chip">${pinsVal}</span>×<span class="chip mult">${mult}</span>=<span class="chip total">${total.toLocaleString()}</span>`;
+  $('popupCharms').innerHTML = fired.map((c) => `<span>${c.icon} ${c.name}</span>`).join('');
+  flashCharms(fired);
   $('popup').classList.add('show');
 }
 function hidePopup() { $('popup').classList.remove('show'); }
@@ -513,8 +751,8 @@ $('rerackBtn').addEventListener('click', () => {
   S.reracks--; S.ballInFrame = 1; S.wasSplit = false; makeRack(); updateHUD();
   $('hint').textContent = 'Fresh rack. This ball can still be a strike.';
 });
-$('startBtn').addEventListener('click', () => { initAudio(); $('startOverlay').classList.add('hidden'); newStation(); });
-$('againBtn').addEventListener('click', () => { $('endOverlay').classList.add('hidden'); newStation(); });
+$('startBtn').addEventListener('click', () => { initAudio(); $('startOverlay').classList.add('hidden'); startRun(); });
+$('againBtn').addEventListener('click', () => { $('endOverlay').classList.add('hidden'); (endAction || startRun)(); });
 
 // tuning panel
 (function buildTune() {
@@ -625,12 +863,13 @@ function drawBall() {
   ctx.fillStyle = 'rgba(30,15,5,.35)';
   ctx.beginPath(); ctx.ellipse(p.x + r * 0.15, p.y, r * 0.95, r * 0.3, 0, 0, Math.PI * 2); ctx.fill();
   const g = ctx.createRadialGradient(p.x - r * 0.35, cy - r * 0.4, r * 0.1, p.x, cy, r);
-  g.addColorStop(0, '#7fb6ff'); g.addColorStop(0.35, '#2459c4'); g.addColorStop(0.8, '#122c74'); g.addColorStop(1, '#081538');
+  const bt = curBall();
+  g.addColorStop(0, bt.colors[0]); g.addColorStop(0.35, bt.colors[1]); g.addColorStop(0.8, bt.colors[2]); g.addColorStop(1, bt.colors[3]);
   ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, cy, r, 0, Math.PI * 2); ctx.fill();
   // swirl + finger holes rotate with roll
   ctx.save(); ctx.beginPath(); ctx.arc(p.x, cy, r, 0, Math.PI * 2); ctx.clip();
   const ph = ball.roll / (2 * Math.PI * ball.r) * Math.PI * 2;
-  ctx.strokeStyle = 'rgba(160,120,255,.35)'; ctx.lineWidth = r * 0.18;
+  ctx.strokeStyle = bt.swirl; ctx.lineWidth = r * 0.18;
   ctx.beginPath(); ctx.arc(p.x + Math.sin(ph * 0.5 + ball.spin) * r * 0.3, cy + Math.cos(ph) * r * 0.5, r * 0.7, 0.4, 2.6); ctx.stroke();
   const vis = Math.cos(ph);
   if (vis > -0.2) {
@@ -711,6 +950,18 @@ function render() {
     ctx.fillStyle = '#3a1f12';
     ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(c.x, c.y); ctx.lineTo(b.x, b.y); ctx.closePath(); ctx.fill();
   }
+  // boss: tilt chevrons painted on the lane, pointing downhill
+  if (R.boss && R.boss.tilt) {
+    const dir = Math.sign(R.boss.tilt);
+    ctx.fillStyle = 'rgba(226,72,61,.28)';
+    for (const z of [300, 420, 540, 640]) {
+      if (z < z0) continue;
+      for (const x0 of [-10, 2, 14]) {
+        const tip = proj(x0 + dir * 4, z + 6), a = proj(x0 - dir * 2, z), b = proj(x0 - dir * 2, z + 12), m = proj(x0, z + 6);
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(tip.x, tip.y); ctx.lineTo(b.x, b.y); ctx.lineTo(m.x, m.y); ctx.closePath(); ctx.fill();
+      }
+    }
+  }
   // pin deck
   strip(-LANE_HALF, LANE_HALF, L - 12, PIT, 'rgba(255,240,215,.18)', 6);
   ctx.fillStyle = 'rgba(70,40,20,.35)';
@@ -787,7 +1038,8 @@ function frame(t) {
 // ---------- Test hooks ----------
 window.render_game_to_text = () => JSON.stringify({
   coords: 'inches; x=0 lane center, +x right; z=0 foul line, head pin z=720',
-  mode: S.mode, frame: S.frame + 1, ballInFrame: S.ballInFrame, score: S.score, target: STATION.target, reracks: S.reracks,
+  mode: S.mode, frame: S.frame + 1, frames: S.frames, ballInFrame: S.ballInFrame, score: S.score, target: S.target, reracks: S.reracks,
+  run: { floor: R.floor, station: STATIONS[R.station].name, cash: R.cash, charms: R.charms, bag: R.bag, ball: R.ballId, boss: R.boss && R.boss.id },
   ball: { x: +ball.x.toFixed(1), z: +ball.z.toFixed(1), gutter: ball.gutter, done: ball.done },
   standing: standing().map((p) => p.n), camZ: Math.round(cam.z), lastThrow: S.lastThrow,
 });
@@ -806,9 +1058,13 @@ window.__sim = (x, targetX, mph, spin) => {
 };
 window.__T = T;
 window.__state = S;
+window.__run = R;
+// QA helpers: grant a charm / ball / cash without the shop
+window.__give = (id) => { if (charmById(id) && !R.charms.includes(id)) R.charms.push(id); else if (BALLS[id] && !R.bag.includes(id)) { R.bag.push(id); setBall(id); } updateHUD(); };
+window.__cash = (n) => { R.cash += n; updateHUD(); };
 
 // ---------- Boot ----------
-makeRack(); resetBall();
+makeRack(); resetBall(); setBall('house'); updateHUD();
 window.addEventListener('resize', layout);
 layout();
 if (document.fonts) document.fonts.ready.then(layout);
