@@ -22,7 +22,7 @@ const PIN_SPOTS = [
   [0, 0], [-6, 1], [6, 1], [-12, 2], [0, 2], [12, 2], [-18, 3], [-6, 3], [6, 3], [18, 3],
 ].map(([x, r]) => ({ x, z: L + r * ROW }));
 
-const T = { hook: 1.0, oilFt: 40, bounce: 0.62, downSens: 1.0, speedMul: 1.0, guide: 1, lieR: 3.6 };
+const T = { hook: 1.0, oilFt: 40, bounce: 0.62, downSens: 1.0, speedMul: 1.0, guide: 1, lieR: 3.6, swipeSpin: 0 };
 const TUNE_DEFS = [
   ['hook', 'Hook strength', 0, 2.5, 0.05],
   ['oilFt', 'Oil length (ft)', 30, 50, 1],
@@ -31,6 +31,7 @@ const TUNE_DEFS = [
   ['speedMul', 'Ball speed', 0.7, 1.4, 0.01],
   ['lieR', 'Fallen pin spread', 2.4, 5, 0.1],
   ['guide', 'Aim guide (0 off / 1 on)', 0, 1, 1],
+  ['swipeSpin', 'Swipe curve adds spin (0 off / 1 on)', 0, 1, 1],
 ];
 
 const STATION = { target: 1200, frames: 5, reracks: 2 };
@@ -56,6 +57,8 @@ const S = {
   stats: { strikes: 0, spares: 0, splits: 0, gutters: 0, best: 0 },
   lastThrow: null,
   aimX: 0,
+  spin: 0,
+  lastAng: 0,
 };
 const ball = { x: 0, z: 10, vx: 0, vz: 0, r: BALL_R, m: BALL_M, spin: 0, active: false, gutter: false, done: false, roll: 0 };
 let pins = [];
@@ -81,6 +84,8 @@ function layout() {
   const ctrlH = $('controls').getBoundingClientRect().height;
   topY = boardH + Math.max(70, H * 0.1);
   bottomY = H - ctrlH - 26;
+  $('readout').style.bottom = (ctrlH + 6) + 'px';
+  $('tunePanel').style.bottom = (ctrlH + 6) + 'px';
   const nearFrac = 0.47;
   const farFrac = 0.16;
   D = L / (nearFrac / farFrac - 1);
@@ -151,21 +156,38 @@ function collide(a, b, e, isBallPin) {
   if (isBallPin && !S.firstContact) { S.firstContact = true; S.slowmo = 0.35; if (navigator.vibrate) navigator.vibrate(12); }
 }
 
+// Hook + lane friction for a rolling ball (shared by the sim and the aim preview)
+function rollKinematics(b, dt, oilZ) {
+  const v = Math.hypot(b.vx, b.vz);
+  const dry = b.z > oilZ ? 1 : 0.1;
+  const slowBoost = Math.max(0.75, Math.min(1.6, 300 / v));
+  const a = 40 * T.hook * b.spin * dry * slowBoost * (b.z < L + 10 ? 1 : 0.3);
+  // positive spin pushes the ball toward -x (hooks left)
+  b.vx += (-b.vz / v) * a * dt;
+  const dec = 10 * dt;
+  b.vx -= (b.vx / v) * dec; b.vz -= (b.vz / v) * dec;
+}
+// Predicted path (no pins) for the aim guide
+function predictPath(x, ang, mph, spin) {
+  const v = mph * T.speedMul * MPH;
+  const b = { x, z: ball.z, vx: v * Math.sin(ang), vz: v * Math.cos(ang), spin };
+  const oilZ = T.oilFt * 12, dt = 1 / 120, pts = [[b.x, b.z]];
+  for (let i = 0; i < 1200 && b.z < L; i++) {
+    rollKinematics(b, dt, oilZ);
+    b.x += b.vx * dt; b.z += b.vz * dt;
+    if (i % 6 === 0) pts.push([b.x, b.z]);
+    if (Math.abs(b.x) > LANE_HALF) { pts.push([b.x, b.z]); return { pts, gutter: true }; }
+  }
+  pts.push([b.x, b.z]);
+  return { pts, gutter: false };
+}
+
 function step(dt) {
   const oilZ = T.oilFt * 12;
   // ball
   if (ball.active && !ball.done) {
     const v = Math.hypot(ball.vx, ball.vz);
-    if (!ball.gutter && v > 1) {
-      const dry = ball.z > oilZ ? 1 : 0.1;
-      const slowBoost = Math.max(0.75, Math.min(1.6, 300 / v));
-      const a = 40 * T.hook * ball.spin * dry * slowBoost * (ball.z < L + 10 ? 1 : 0.3);
-      // perpendicular-left of travel for positive spin (hook toward -x)
-      ball.vx += (-ball.vz / v) * a * dt;
-      ball.vz += (ball.vx / v) * a * dt * 0; // keep forward speed steady; lateral only
-      const dec = 10 * dt;
-      ball.vx -= (ball.vx / v) * dec; ball.vz -= (ball.vz / v) * dec;
-    }
+    if (!ball.gutter && v > 1) rollKinematics(ball, dt, oilZ);
     ball.x += ball.vx * dt; ball.z += ball.vz * dt;
     ball.roll += v * dt;
     if (!ball.gutter && Math.abs(ball.x) > LANE_HALF && ball.z < PIT) {
@@ -220,6 +242,7 @@ function launch(targetX, mph, spin) {
   let ang = Math.atan2(targetX - ball.x, ARROW_Z - ball.z);
   const maxA = 7 * Math.PI / 180;
   ang = Math.max(-maxA, Math.min(maxA, ang));
+  S.lastAng = ang;
   const v = mph * MPH;
   ball.vx = v * Math.sin(ang); ball.vz = v * Math.cos(ang);
   ball.spin = spin; ball.active = true; ball.gutter = false; ball.done = false;
@@ -327,7 +350,7 @@ function newStation() {
     stats: { strikes: 0, spares: 0, splits: 0, gutters: 0, best: 0 }, lastThrow: null });
   makeRack(); resetBall(); cam.z = 0;
   S.mode = 'aim';
-  $('hint').textContent = 'Drag to move. Swipe up toward the arrows. Curve your swipe to hook.';
+  $('hint').textContent = 'Pick a spin, drag to move, then swipe up toward the arrows.';
   updateHUD(); renderReadout();
 }
 
@@ -361,7 +384,7 @@ function renderReadout() {
   const b = Math.round((LANE_HALF - S.aimX) / BOARD + 0.5);
   const t = S.lastThrow;
   $('readout').innerHTML = `Standing on <b>board ${b}</b>` + (t
-    ? `<br>Last: <b>${t.mph} mph</b> · hook <b>${Math.abs(t.spin).toFixed(2)}${t.spin > 0.02 ? ' L' : t.spin < -0.02 ? ' R' : ''}</b><br>Board ${t.startBoard} → ${t.arrowBoard} at arrows`
+    ? `<br>Last: <b>${t.mph} mph</b> · <b>${spinLabel(t.spin)}</b><br>Board ${t.startBoard} → ${t.arrowBoard} at arrows`
     : '');
 }
 let popupT = null;
@@ -403,9 +426,12 @@ function analyzeSwipe(sw) {
     // c > 0 when the point lies right of the chord (screen). Bulge right => hook left (+spin)
     if (Math.abs(c) > Math.abs(dev)) dev = c;
   }
-  let spin = (dev / len) * 4.5;
-  if (Math.abs(spin) < 0.08) spin = 0;
-  spin = Math.max(-1, Math.min(1, spin));
+  let spin = S.spin;
+  if (T.swipeSpin) {
+    let sw = (dev / len) * 3;
+    if (Math.abs(sw) < 0.12) sw = 0;
+    spin = Math.max(-1, Math.min(1, spin + sw));
+  }
   // speed over last 140ms
   const tEnd = b.t; let i = pts.length - 1;
   while (i > 0 && tEnd - pts[i - 1].t < 140) i--;
@@ -450,6 +476,37 @@ slider.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowLeft') sliderSet(r.left + (f - 0.03) * r.width);
   if (e.key === 'ArrowRight') sliderSet(r.left + (f + 0.03) * r.width);
 });
+
+// spin selector
+const SPIN_STOPS = [0.9, 0.6, 0.3, 0, -0.3, -0.6, -0.9];
+function spinLabel(v) {
+  if (Math.abs(v) < 0.05) return 'Straight';
+  const a = Math.abs(v), side = v > 0 ? 'left' : 'right';
+  const size = a < 0.45 ? 'Light' : a < 0.75 ? 'Medium' : 'Big';
+  return `${size} hook ${side}`;
+}
+function spinIcon(v) {
+  // lane-view sketch of the ball path: rolls up, drifts out, then hooks back near the pins
+  const k = -v; // screen x direction of the hook (left hook bends toward smaller x)
+  const out = 12 - k * 3, end = 12 + k * 8;
+  return `<svg viewBox="0 0 24 28" aria-hidden="true"><path d="M12 25 C ${out} 15, ${out} 9, ${end} 4" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/><circle cx="${end}" cy="4" r="2.6" fill="currentColor"/><circle cx="12" cy="25" r="2" fill="currentColor" opacity=".55"/></svg>`;
+}
+(function buildSpin() {
+  const host = $('spinRow');
+  SPIN_STOPS.forEach((v) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'spin-btn'; b.innerHTML = spinIcon(v);
+    b.setAttribute('aria-label', spinLabel(v)); b.dataset.v = v;
+    b.addEventListener('click', () => setSpin(v));
+    host.appendChild(b);
+  });
+})();
+function setSpin(v) {
+  S.spin = v;
+  document.querySelectorAll('.spin-btn').forEach((b) => b.classList.toggle('on', +b.dataset.v === v));
+  $('spinLabel').textContent = spinLabel(v);
+}
+setSpin(0);
 
 $('rerackBtn').addEventListener('click', () => {
   if (!(S.mode === 'aim' && S.ballInFrame === 2 && S.reracks > 0)) return;
@@ -685,21 +742,23 @@ function render() {
   ctx.fillStyle = '#0d0807'; ctx.fillRect(0, 0, W, Math.max(0, mTop));
 
   // aim guide
-  if (S.mode === 'aim' && swipe && T.guide) {
-    const r = analyzeSwipe(swipe);
+  if (S.mode === 'aim' && T.guide) {
+    const r = swipe ? analyzeSwipe(swipe) : null;
+    const maxA = 7 * Math.PI / 180;
+    let ang = r ? Math.atan2(r.targetX - ball.x, ARROW_Z - ball.z) : S.lastAng;
+    ang = Math.max(-maxA, Math.min(maxA, ang));
+    const pred = predictPath(ball.x, ang, r ? r.mph : 17, r ? r.spin : S.spin);
+    ctx.setLineDash([7, 6]); ctx.lineWidth = 2.5;
+    ctx.strokeStyle = pred.gutter ? 'rgba(226,72,61,.9)' : r ? 'rgba(255,176,46,.95)' : 'rgba(255,176,46,.7)';
+    ctx.beginPath();
+    pred.pts.forEach(([x, z], i) => { const p = proj(x, z); i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); });
+    ctx.stroke(); ctx.setLineDash([]);
     if (r) {
-      let ang = Math.atan2(r.targetX - ball.x, ARROW_Z - ball.z);
-      const maxA = 7 * Math.PI / 180; ang = Math.max(-maxA, Math.min(maxA, ang));
-      ctx.setLineDash([6, 6]); ctx.strokeStyle = 'rgba(255,176,46,.85)'; ctx.lineWidth = 2;
-      ctx.beginPath();
-      for (let i = 0; i <= 20; i++) { const z = ball.z + (L - ball.z) * i / 20; const p = proj(ball.x + Math.tan(ang) * (z - ball.z), z); i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); }
-      ctx.stroke(); ctx.setLineDash([]);
       const ap = proj(ball.x + Math.tan(ang) * (ARROW_Z - ball.z), ARROW_Z);
       ctx.fillStyle = '#ffb02e'; ctx.beginPath(); ctx.arc(ap.x, ap.y, 5, 0, Math.PI * 2); ctx.fill();
       const last = swipe.pts[swipe.pts.length - 1];
       ctx.font = "600 14px 'Barlow Semi Condensed'"; ctx.textAlign = 'center'; ctx.fillStyle = '#f6ecdc';
-      const hk = r.spin === 0 ? 'Straight' : `Hook ${Math.abs(r.spin).toFixed(2)} ${r.spin > 0 ? 'L' : 'R'}`;
-      ctx.fillText(hk, last.x, last.y - 26);
+      ctx.fillText(`${r.mph.toFixed(1)} mph · ${spinLabel(r.spin)}`, last.x, last.y - 26);
     }
   }
   if (swipe) {

@@ -39,7 +39,11 @@
   <div class="readout" id="readout"></div>
 
   <footer class="controls" id="controls">
-    <div class="hint" id="hint">Drag to move. Swipe up toward the arrows. Curve your swipe to hook.</div>
+    <div class="hint" id="hint">Pick a spin, drag to move, then swipe up toward the arrows.</div>
+    <div class="spin-wrap">
+      <div class="spin-head"><span class="eyebrow">Spin</span><span class="spin-label" id="spinLabel">Straight</span></div>
+      <div class="spin-row" id="spinRow" role="group" aria-label="Spin"></div>
+    </div>
     <div class="control-row">
       <div class="slider" id="slider" role="slider" aria-label="Ball position" aria-valuemin="1" aria-valuemax="39" tabindex="0">
         <div class="slider-track">
@@ -59,7 +63,7 @@
       <ul class="howto">
         <li><b>Move</b> by dragging the bar at the bottom.</li>
         <li><b>Throw</b> by swiping up on the lane toward the arrows.</li>
-        <li><b>Hook</b> by curving your swipe. Bulge right to hook left.</li>
+        <li><b>Spin</b> by tapping a curve button. The dotted line shows where the ball will hook.</li>
         <li><b>Swipe faster</b> for more speed. Slower balls hook more.</li>
       </ul>
       <p class="goal">Score <b>1,200</b> in 5 frames. Score = Pins × Mult.<br />Strike ×4 · Spare ×3 · Split pickup ×5 · Turkey ×8</p>
