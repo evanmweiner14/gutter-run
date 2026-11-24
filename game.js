@@ -42,97 +42,59 @@ const STATIONS = [
   { key: 'league', name: 'League Night', tmult: 1.35, reward: 4 },
   { key: 'boss', name: 'Boss Lane', tmult: 1.75, reward: 5 },
 ];
-// Open Lane target per floor; League Night and Boss Lane scale it by tmult. First pass, retune after the charm expansion.
-const FLOOR_TARGETS = [900, 1300, 1800, 2500, 3400, 4600, 6200, 8300];
+// Open Lane target per floor; League Night and Boss Lane scale it by tmult.
+// Tuned for the full Phase 2 item pool (40 charms, trophies, pin mods); needs playtesting.
+const FLOOR_TARGETS = [900, 1400, 2100, 3200, 4800, 7000, 10000, 14000];
 const BASE_TARGET = FLOOR_TARGETS[0];
-const BASE_FRAMES = 5, BASE_RERACKS = 2, CHARM_SLOTS = 5, BAG_SLOTS = 3, START_CASH = 4, REROLL_BASE = 5;
+const BASE_FRAMES = 5, BASE_RERACKS = 2, CHARM_SLOTS = 5, BAG_SLOTS = 3, OIL_SLOTS = 2, START_CASH = 5, REROLL_BASE = 5;
 function stationTarget(floor, idx) {
   const base = FLOOR_TARGETS[Math.min(floor, FLOOR_TARGETS.length) - 1];
   return Math.round(base * STATIONS[idx].tmult / 50) * 50;
 }
 
-// ---------- Content (data-driven) ----------
-const BALLS = {
-  house: { id: 'house', name: 'House Ball', desc: 'Balanced and reliable.', mass: 15, hook: 1, price: 0,
-    colors: ['#7fb6ff', '#2459c4', '#122c74', '#081538'], swirl: 'rgba(160,120,255,.35)' },
-  resin: { id: 'resin', name: 'Reactive Resin', desc: 'Hooks 60% harder once it reaches the dry back end.', mass: 15, hook: 1.6, price: 6,
-    colors: ['#ff9bf0', '#b02ab8', '#5c0f6b', '#2a0533'], swirl: 'rgba(255,200,120,.35)' },
-  urethane: { id: 'urethane', name: 'Heavy Urethane', desc: 'Heavier, so it drives through the rack. Hooks a little less.', mass: 19, hook: 0.8, price: 6,
-    colors: ['#ffc38a', '#d4541c', '#7a2108', '#3a0d02'], swirl: 'rgba(255,240,200,.3)' },
-};
-
-// Boss rules are plain fields read by the physics, scoring and HUD:
-// tilt (in/s² sideways), oilFt (oil length), trim (inches of lane lost per side), fog (z beyond which the lane is hidden),
-// moving (rack sway in inches), bolted (pins that can't fall), pinMass/downMul (heavier, sturdier pins),
-// maxSpeed (mph cap), frames/reracks (station changes), thief (disable a random charm), score(c) (runs after charms).
-const BOSSES = [
-  { id: 'tilt', icon: '📐', name: 'The Tilt', desc: 'The lane slopes left. Every ball drifts toward the left gutter.',
-    hint: 'The Tilt: the lane slopes left. Aim right.', tilt: -6 },
-  { id: 'fog', icon: '☁️', name: 'Fog Machine', desc: 'The back half of the lane is hidden until the pins settle.',
-    hint: 'Fog Machine: trust the pin map and your line.', fog: 380 },
-  { id: 'moving', icon: '🚚', name: 'Moving Day', desc: 'The rack slides side to side while you line up.',
-    hint: 'Moving Day: time your throw to the rack.', moving: 7 },
-  { id: 'bolted', icon: '🔩', name: 'Bolted', desc: 'Two pins in every rack are bolted down. They never fall and don\'t count.',
-    hint: 'Bolted: the steel pins won\'t fall. Play around them.', bolted: 2 },
-  { id: 'spareme', icon: '🙅', name: 'Spare Me', desc: 'First balls score nothing, strikes included. Spares and split pickups get double Mult.',
-    hint: 'Spare Me: leave pins on ball one, then pick up the spare.',
-    score(c) { if (c.firstBall && c.mult > 0) { c.mult = 0; return true; } if (c.type === 'spare' || c.type === 'split') { c.mult *= 2; return true; } } },
-  { id: 'wide', icon: '🚧', name: 'Wide Gutters', desc: 'The gutters eat 3 inches of lane on each side.',
-    hint: 'Wide Gutters: stay off the edges.', trim: 3 },
-  { id: 'thief', icon: '🐀', name: 'Charm Thief', desc: 'One of your charms is disabled for this station.',
-    hint: 'Charm Thief: one charm is switched off.', thief: true },
-  { id: 'slick', icon: '💧', name: 'The Slick', desc: 'Oil runs to 55 feet. The ball barely hooks.',
-    hint: 'The Slick: almost no hook. Play straighter.', oilFt: 55 },
-  { id: 'burn', icon: '🌵', name: 'The Burn', desc: 'A bone-dry lane. The ball hooks from the foul line.',
-    hint: 'The Burn: no oil, so hooks start early. Use less spin.', oilFt: 0 },
-  { id: 'lead', icon: '⚓', name: 'Lead Rack', desc: 'Heavy, sturdy pins that are harder to knock over.',
-    hint: 'Lead Rack: hit the pocket hard.', pinMass: 1.8, downMul: 0.65 },
-  { id: 'speedtrap', icon: '🚨', name: 'Speed Trap', desc: 'Ball speed is capped at 15 mph.',
-    hint: 'Speed Trap: 15 mph max. Slow balls hook more.', maxSpeed: 15 },
-  { id: 'clock', icon: '⏰', name: 'The Clock', desc: 'One frame fewer and no re-racks.',
-    hint: 'The Clock: 4 frames, no re-racks.', frames: -1, reracks: 0 },
-];
-const FINAL_BOSS = { id: 'proprietor', icon: '🎩', name: 'The Proprietor', final: true,
-  desc: 'The owner stacks the deck: the lane slopes left, the gutters are wider and the pins are heavier.',
-  hint: 'The Proprietor: tilt, wide gutters and heavy pins.', tilt: -5, trim: 2.5, pinMass: 1.4, downMul: 0.8 };
+// ---------- Content (data-driven, from content.js) ----------
+const { RARITY, ROLL_TYPES, BALLS, PIN_MODS, OILS, TROPHIES, BOSSES, FINAL_BOSS, CHARMS } = window.GR;
 const bossForFloor = (f) => (f >= RUN_FLOORS ? FINAL_BOSS : BOSSES.find((b) => b.id === R.bossOrder[f - 1]) || BOSSES[0]);
 const boss = () => R.boss || {};
-const oilZ = () => (boss().oilFt ?? T.oilFt) * 12;
+const oilZ = () => (S.dryNext ? 0 : (boss().oilFt ?? T.oilFt) * 12);
 const laneEdge = () => LANE_HALF - (boss().trim || 0);
 
-// Charms subscribe to events. score(c) gets the roll context { type, strike, streak, knocked, domino,
-// lastFrame, pins, mult } and returns true when it changed something. stationStart(st) can edit { frames, reracks }.
-const CHARMS = [
-  { id: 'sock', name: 'Lucky Sock', icon: '🧦', price: 5, desc: 'Strikes give +4 Mult.',
-    score(c) { if (c.strike) { c.mult += 4; return true; } } },
-  { id: 'hot', name: 'Hot Hand', icon: '🔥', price: 6, desc: 'Strikes give +2 Mult for every strike in a row.',
-    score(c) { if (c.strike) { c.mult += 2 * c.streak; return true; } } },
-  { id: 'punk', name: 'Gutter Punk', icon: '🤘', price: 4, desc: 'Gutter balls score +20 Pins at ×2 Mult instead of nothing.',
-    score(c) { if (c.type === 'gutter') { c.pins += 20; c.mult = 2; return true; } } },
-  { id: 'savant', name: 'Seven-Ten Savant', icon: '🎯', price: 6, desc: 'Split pickups give ×2 Mult.',
-    score(c) { if (c.type === 'split') { c.mult *= 2; return true; } } },
-  { id: 'domino', name: 'Domino Effect', icon: '💥', price: 5, desc: '+5 Pins for each pin knocked down by another pin instead of the ball.',
-    score(c) { if (c.domino > 0) { c.pins += 5 * c.domino; return true; } } },
-  { id: 'lastcall', name: 'Last Call', icon: '🍺', price: 5, desc: 'Every roll in your final frame gets ×3 Mult.',
-    score(c) { if (c.lastFrame && c.mult > 0) { c.mult *= 3; return true; } } },
-  { id: 'shoes', name: 'Bowling Shoes', icon: '👟', price: 6, desc: '+1 frame at every station.',
-    stationStart(st) { st.frames += 1; return true; } },
-  { id: 'spare', name: 'Spare Parts', icon: '🔧', price: 4, desc: '+1 re-rack at every station.',
-    stationStart(st) { st.reracks += 1; return true; } },
-];
 const charmById = (id) => CHARMS.find((c) => c.id === id);
+const activeCharms = () => R.charms.filter((id, i) => i !== R.stolenIdx).map(charmById);
+const charmFlag = (k) => activeCharms().reduce((a, c) => a + (c[k] ? +c[k] : 0), 0);
+const charmDesc = (c) => c.desc.replace('{n}', (R.cs[c.id] && R.cs[c.id].n) || 0);
+const rollLevel = (type) => R.levels[type] || 1;
+function rollBase(type) {
+  const t = ROLL_TYPES[type], lv = rollLevel(type);
+  return { pins: t.pins + (lv - 1) * t.lvPins, mult: t.mult + (lv - 1) * t.lvMult, lv };
+}
 
 // Run state (persists across stations)
-const R = { floor: 1, station: 0, cash: START_CASH, charms: [], bag: ['house'], ballId: 'house', boss: null,
-  bossOrder: [], stolen: null, rerollCost: REROLL_BASE, offers: [], cleared: [], totals: { score: 0, strikes: 0, spares: 0 } };
+const newRunState = () => ({ floor: 1, station: 0, cash: START_CASH, charms: [], cs: {}, bag: ['house'], ballId: 'house', boss: null,
+  bossOrder: [], stolenIdx: -1, pinMods: {}, oils: [], levels: {}, rerollCost: REROLL_BASE, rerollsThisShop: 0,
+  offers: [], cleared: [], totals: { score: 0, strikes: 0, spares: 0 } });
+const R = newRunState();
 const curBall = () => BALLS[R.ballId];
-function fire(event, ctx) {
+// helpers charms can call (third hook argument)
+const API = {
+  tempMod(mod) {   // give a random standing, unmodded pin a mod for this rack only
+    const pool = pins.filter((p) => p.alive && !p.down && !p.bolted && !p.mod);
+    if (!pool.length) return;
+    const p = pool[Math.floor(Math.random() * pool.length)];
+    p.mod = mod; p.temp = true;
+  },
+};
+// Fire an event at every active charm (in slot order), then the ball, then the boss.
+function fire(event, arg) {
   const fired = [];
-  for (const id of R.charms) {
-    if (id === R.stolen) continue;
-    const ch = charmById(id); if (ch[event] && ch[event](ctx)) fired.push(ch);
-  }
-  if (R.boss && R.boss[event] && R.boss[event](ctx)) fired.push(R.boss);
+  R.charms.forEach((id, i) => {
+    if (i === R.stolenIdx) return;
+    const ch = charmById(id);
+    if (ch[event] && ch[event](arg, R.cs[id] || (R.cs[id] = {}), API)) fired.push(ch);
+  });
+  const b = curBall();
+  if (b[event] && b[event](arg, {}, API)) fired.push({ id: 'ball', icon: '🎳', name: b.name });
+  if (R.boss && R.boss[event] && R.boss[event](arg, {}, API)) fired.push(R.boss);
   return fired;
 }
 
@@ -169,16 +131,20 @@ let standingBefore = [];
 function makeRack() {
   const b = boss();
   const off = S.rackOff || 0;
-  pins = PIN_SPOTS.map((p, i) => ({
-    n: i + 1, x: p.x + off, z: p.z, sx: p.x + off, sz: p.z, vx: 0, vz: 0, r: PIN_R, m: PIN_M * (b.pinMass || 1),
-    alive: true, down: false, fallT: 0, fx: 0, fz: 1, wobble: 0, gutter: false, fade: 1, bolted: false,
-  }));
+  pins = PIN_SPOTS.map((p, i) => {
+    const mod = R.pinMods[i + 1] || null;
+    return {
+      n: i + 1, x: p.x + off, z: p.z, sx: p.x + off, sz: p.z, vx: 0, vz: 0, r: PIN_R,
+      m: PIN_M * (b.pinMass || 1) * ((mod && PIN_MODS[mod].mass) || 1), mod, temp: false,
+      alive: true, down: false, fallT: 0, fx: 0, fz: 1, wobble: 0, gutter: false, fade: 1, bolted: false,
+    };
+  });
   if (b.bolted) {
     // never bolt the head pin, so there is always a pocket to aim at
     const pool = pins.filter((p) => p.n !== 1);
     for (let k = 0; k < b.bolted && pool.length; k++) {
       const p = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
-      p.bolted = true; p.m = 1e6;
+      p.bolted = true; p.m = 1e6; p.mod = null;
     }
   }
 }
@@ -256,6 +222,7 @@ function collide(a, b, e, isBallPin) {
   const d = Math.sqrt(d2), nx = dx / d, nz = dz / d;
   const pen = rr - d;
   if (isBallPin) b.ballHit = true;
+  if (a.mod === 'rubber' || b.mod === 'rubber') e = 0.95;   // Rubber Pin
   const ia = 1 / a.m, ib = 1 / b.m;
   a.x -= nx * pen * ia / (ia + ib); a.z -= nz * pen * ia / (ia + ib);
   b.x += nx * pen * ib / (ia + ib); b.z += nz * pen * ib / (ia + ib);
@@ -306,7 +273,15 @@ function step(dt) {
     ball.x += ball.vx * dt; ball.z += ball.vz * dt;
     ball.roll += v * dt;
     // Wide Gutters trims the lane up to the pin deck; the deck itself keeps full width
-    if (!ball.gutter && Math.abs(ball.x) > (ball.z < L - 12 ? laneEdge() : LANE_HALF) && ball.z < PIT) {
+    const edgeNow = ball.z < L - 12 ? laneEdge() : LANE_HALF;
+    if (!ball.gutter && Math.abs(ball.x) > edgeNow && ball.z < PIT && (S.bumperNext || S.bumperCharges > 0)) {
+      // Bumpers (Lane Oil) or Bumper Sticker (charm): bounce back onto the lane
+      // a Bumper Sticker charge protects the rest of this roll, like real bumpers
+      if (!S.bumperNext) { S.bumperCharges--; S.bumperNext = true; }
+      ball.x = Math.sign(ball.x) * (edgeNow - 0.5); ball.vx = -ball.vx * 0.7;
+      clack(0.5); S.bumpFlash = 0.4;
+    }
+    if (!ball.gutter && Math.abs(ball.x) > edgeNow && ball.z < PIT) {
       ball.gutter = true;
       ball.x = Math.sign(ball.x) * (LANE_HALF + GUTTER_W * 0.5);
       ball.vz = Math.hypot(ball.vx, ball.vz) * 0.95; ball.vx = 0;
@@ -315,10 +290,20 @@ function step(dt) {
     if (ball.z > PIT + 8) { ball.done = true; }
     if (ball.vz < 5 && ball.z < PIT) { ball.done = true; }
   }
+  // Magnet Ball: standing pins near the ball drift toward it
+  const mag = curBall().magnet;
+  if (mag && ball.active && !ball.done && !ball.gutter && ball.z > L - 50) {
+    for (const p of pins) {
+      if (!p.alive || p.down || p.bolted) continue;
+      const dx = ball.x - p.x, dz = ball.z - p.z, d = Math.hypot(dx, dz);
+      if (d < 22 && d > 0.1) { p.vx += (dx / d) * mag * dt; p.vz += (dz / d) * mag * dt * 0.4; }
+    }
+  }
   // pins
   for (const p of pins) {
     if (!p.alive) continue;
     if (p.bolted) { p.x = p.sx; p.z = p.sz; p.vx = p.vz = 0; continue; }
+    const sturdy = (p.mod && PIN_MODS[p.mod].sturdy) || 1;
     if (p.down && p.r < T.lieR) p.r = Math.min(T.lieR, p.r + dt * 20);
     const v = Math.hypot(p.vx, p.vz);
     if (v > 0) {
@@ -335,10 +320,11 @@ function step(dt) {
     if (!p.down) {
       const disp = Math.hypot(p.x - p.sx, p.z - p.sz);
       const sp = Math.hypot(p.vx, p.vz);
-      if (disp > 1.9 / downSens || sp > 24 / downSens || p.gutter) {
+      if (disp > 1.9 * sturdy / downSens || sp > 24 * sturdy / downSens || p.gutter) {
         p.down = true; p.fallT = 0;
         const dl = sp > 1 ? sp : Math.max(0.001, disp);
         p.fx = sp > 1 ? p.vx / dl : (p.x - p.sx) / dl; p.fz = sp > 1 ? p.vz / dl : (p.z - p.sz) / dl;
+        if (p.mod === 'boom') explode(p);
       } else if (sp > 1.5) {
         p.wobble = Math.min(1, p.wobble + sp * 0.01);
       }
@@ -353,8 +339,23 @@ function step(dt) {
     for (let j = i + 1; j < bodies.length; j++) collide(bodies[i], bodies[j], T.bounce, false);
 }
 
+// Explosive Pin: shove every nearby standing pin outward
+const blasts = [];
+function explode(p) {
+  if (p.exploded) return;
+  p.exploded = true;
+  for (const q of pins) {
+    if (q === p || !q.alive || q.bolted) continue;
+    const dx = q.x - p.x, dz = q.z - p.z, d = Math.hypot(dx, dz);
+    if (d < 16 && d > 0.01) { const k = 260 * (1 - d / 16) + 60; q.vx += (dx / d) * k; q.vz += (dz / d) * k; }
+  }
+  blasts.push({ x: p.x, z: p.z, t: 0 });
+  clack(1); if (navigator.vibrate) navigator.vibrate(30);
+}
+
 // ---------- Throw ----------
 function launch(targetX, mph, spin) {
+  if (curBall().chaos) spin = Math.round((Math.random() * 1.8 - 0.9) * 10) / 10;   // Ball of Chaos
   mph *= T.speedMul;
   let ang = Math.atan2(targetX - ball.x, ARROW_Z - ball.z);
   const maxA = 7 * Math.PI / 180;
@@ -395,44 +396,83 @@ function evaluateRoll() {
   const domino = pins.filter((p) => knockedNums.includes(p.n) && !p.ballHit).length;
   const firstBall = S.ballInFrame === 1;
   const fresh = firstBall && standingBefore.length === 10 - pins.filter((p) => p.bolted).length;
-  let title, bonus = 0, mult = 1, cls = '', type = 'open';
+  let title, cls = '', type = 'open', splitLeave = false;
   let frameOver = false;
-  const missType = () => { type = ball.gutter ? 'gutter' : 'miss'; title = ball.gutter ? 'GUTTER' : 'MISS'; mult = ball.gutter ? 0 : 1; cls = 'red'; if (ball.gutter) S.stats.gutters++; };
+  const pinsTitle = () => `${knocked} PIN${knocked === 1 ? '' : 'S'}`;
+  const missType = () => { type = ball.gutter ? 'gutter' : 'miss'; title = ball.gutter ? 'GUTTER' : 'MISS'; cls = 'red'; if (ball.gutter) S.stats.gutters++; };
   if (S.ballInFrame === 1) {
     if (now.length === 0 && fresh) {
       S.strikeStreak++; S.stats.strikes++;
-      if (S.strikeStreak >= 3) { title = 'TURKEY!'; bonus = 100; mult = 8; type = 'turkey'; }
-      else { title = 'STRIKE!'; bonus = 50; mult = 4; type = 'strike'; }
+      if (S.strikeStreak >= 3) { title = 'TURKEY!'; type = 'turkey'; }
+      else { title = 'STRIKE!'; type = 'strike'; }
       frameOver = true;
     } else {
       S.strikeStreak = 0;
       const backDown = [7, 8, 9, 10].every((n) => !now.includes(n));
       S.wasSplit = isSplit(now);
       if (knocked === 0) missType();
-      else if (backDown) { title = 'CLEAN BACK ROW'; bonus = 20; mult = 2; cls = 'small'; type = 'backrow'; }
-      else if (S.wasSplit) { title = 'SPLIT!'; cls = 'red'; S.stats.splits++; }
-      else { title = `${knocked} PIN${knocked === 1 ? '' : 'S'}`; cls = 'small'; }
+      else if (backDown) { title = 'CLEAN BACK ROW'; cls = 'small'; type = 'backrow'; }
+      else if (S.wasSplit) { title = 'SPLIT!'; cls = 'red'; S.stats.splits++; splitLeave = true; }
+      else { title = pinsTitle(); cls = 'small'; }
       S.ballInFrame = 2;
     }
   } else {
     if (now.length === 0) {
-      if (S.wasSplit) { title = 'SPLIT PICKUP!'; bonus = 60; mult = 5; type = 'split'; }
-      else { title = 'SPARE!'; bonus = 30; mult = 3; type = 'spare'; }
+      if (S.wasSplit) { title = 'SPLIT PICKUP!'; type = 'split'; }
+      else { title = 'SPARE!'; type = 'spare'; }
       S.stats.spares++;
     } else if (knocked === 0) missType();
-    else { title = `${knocked} PIN${knocked === 1 ? '' : 'S'}`; cls = 'small'; }
+    else { title = pinsTitle(); cls = 'small'; }
     S.strikeStreak = 0;
     frameOver = true;
   }
-  const c = { type, firstBall, strike: type === 'strike' || type === 'turkey', streak: S.strikeStreak, knocked, domino,
-    lastFrame: S.frame === S.frames - 1, pins: knocked * 10 + bonus, mult };
-  const fired = fire('score', c);
+  // base value from the roll type and its Trophy level
+  let bonus = 0, mult = type === 'gutter' ? 0 : 1, lv = 1;
+  if (ROLL_TYPES[type]) {
+    const rb = rollBase(type);
+    bonus = rb.pins; mult = rb.mult; lv = rb.lv;
+    if (type === 'open' && knocked === 0) { bonus = 0; mult = 1; }
+  }
+  if (lv > 1) title += ` Lv.${lv}`;
+  const knockedPins = pins.filter((p) => knockedNums.includes(p.n));
+  const mods = knockedPins.filter((p) => p.mod).map((p) => p.mod);
+  const c = { type, firstBall, fresh, splitLeave, strike: type === 'strike' || type === 'turkey', streak: S.strikeStreak,
+    knocked, knockedNums, domino, lastFrame: S.frame === S.frames - 1, firstRoll: S.rollNo === 0,
+    pins: knocked * 10 + bonus, mult, cash: 0, spin: S.lastThrow ? S.lastThrow.spin : 0, speed: S.lastThrow ? S.lastThrow.mph : 17,
+    ballId: R.ballId, mods, isBoss: !!R.boss, scoreSoFar: S.score, target: S.target, charmCount: R.charms.length };
+  // pin mods score first (like card enhancements), then charms, ball and boss
+  const fired = [];
+  for (const p of knockedPins) {
+    if (!p.mod) continue;
+    const m = PIN_MODS[p.mod];
+    if (p.mod === 'gold') c.cash += 2;
+    if (p.mod === 'lead') c.pins += 50;
+    if (p.mod === 'glass') {
+      c.mult *= 2;
+      if (!p.temp && Math.random() < 0.25) { delete R.pinMods[p.n]; fired.push({ id: 'shatter', icon: '💔', name: `Glass ${p.n}-pin shattered` }); }
+    }
+    if (['gold', 'lead', 'glass', 'boom'].includes(p.mod) || p.ghosted) fired.push({ id: 'mod', icon: m.icon, name: p.ghosted ? 'Ghost Pin vanished' : m.name });
+  }
+  fired.push(...fire('score', c));
+  if (S.doubleNext && c.mult > 0) { c.mult *= 2; fired.push({ id: 'oil', icon: OILS.double.icon, name: OILS.double.name }); }
   const pinsVal = c.pins, total = Math.round(c.pins * c.mult);
   S.score += total;
+  S.rollNo++;
+  if (c.cash) R.cash += c.cash;
   S.stats.best = Math.max(S.stats.best, total);
-  showPopup(title, cls, pinsVal, +c.mult.toFixed(2), total, fired);
+  // one-roll oils wear off
+  S.bumperNext = false; S.dryNext = false; S.doubleNext = false;
+  showPopup(title, cls, pinsVal, +c.mult.toFixed(2), total, fired, c.cash);
   S.pendingFrameOver = frameOver;
   S.mode = 'result'; S.timer = 1.6;
+}
+
+// Ghost Pins: a standing ghost counts as down half the time once the roll settles
+function resolveGhosts() {
+  for (const p of pins) {
+    if (p.mod !== 'ghost' || !p.alive || p.down || p.bolted || !standingBefore.includes(p.n)) continue;
+    if (Math.random() < 0.5) { p.down = true; p.ghosted = true; p.fallT = 0; const a = Math.random() * Math.PI * 2; p.fx = Math.cos(a); p.fz = Math.sin(a); }
+  }
 }
 
 function afterResult() {
@@ -462,13 +502,16 @@ function endStation(won) {
   const finalStation = R.station === STATIONS.length - 1 && R.floor >= RUN_FLOORS;
   let rows = [['Strikes', st.strikes], ['Spares', st.spares], ['Splits', st.splits], ['Best roll', st.best.toLocaleString()]];
   let cashHtml = '';
+  const ev = { won, reracksLeft: S.reracks, framesLeft: left, cash: 0 };
+  const endFired = fire('stationEnd', ev);
   if (won) {
     const interest = Math.min(5, Math.floor(R.cash / 5));
-    const earned = def.reward + left + interest;
+    const earned = def.reward + left + interest + ev.cash;
     cashHtml = `<div class="cash-lines">
       <div><span>${def.name} cleared</span><b>$${def.reward}</b></div>
       <div><span>Frames left (${left} × $1)</span><b>$${left}</b></div>
       <div><span>Interest ($1 per $5 held, max $5)</span><b>$${interest}</b></div>
+      ${ev.cash ? `<div><span>Charms (${endFired.map((c) => c.icon).join(' ')})</span><b>$${ev.cash}</b></div>` : ''}
       <div class="sum"><span>Cash</span><b>$${R.cash} → $${R.cash + earned}</b></div></div>`;
     R.cash += earned;
     R.cleared[R.station] = true;
@@ -500,20 +543,22 @@ function newStation() {
   const def = STATIONS[R.station];
   R.boss = def.key === 'boss' ? bossForFloor(R.floor) : null;
   const b = boss();
-  R.stolen = b.thief && R.charms.length ? R.charms[Math.floor(Math.random() * R.charms.length)] : null;
+  R.stolenIdx = b.thief && R.charms.length ? Math.floor(Math.random() * R.charms.length) : -1;
   S.rackOff = 0;
   S.fogA = b.fog ? 1 : 0;
-  const st = { frames: BASE_FRAMES, reracks: BASE_RERACKS };
+  const st = { frames: BASE_FRAMES, reracks: BASE_RERACKS, bumpers: 0, isBoss: !!R.boss };
   fire('stationStart', st);
   st.frames = Math.max(1, st.frames + (b.frames || 0));
   if (b.reracks != null) st.reracks = b.reracks;
   applySpeedCap();
   Object.assign(S, { score: 0, shownScore: 0, frame: 0, ballInFrame: 1, reracks: st.reracks, frames: st.frames,
-    target: stationTarget(R.floor, R.station), strikeStreak: 0, wasSplit: false,
+    target: stationTarget(R.floor, R.station), strikeStreak: 0, wasSplit: false, rollNo: 0,
+    bumperCharges: st.bumpers, bumperNext: false, dryNext: false, doubleNext: false,
     stats: { strikes: 0, spares: 0, splits: 0, gutters: 0, best: 0 }, lastThrow: null });
   makeRack(); resetBall(); cam.z = 0;
   S.mode = 'aim';
-  $('hint').textContent = R.boss ? R.boss.hint + (R.stolen ? ` (${charmById(R.stolen).name} is off.)` : '') : 'Pick spin and speed, drag to move, then swipe up to aim.';
+  const stolen = R.stolenIdx >= 0 ? charmById(R.charms[R.stolenIdx]) : null;
+  $('hint').textContent = R.boss ? R.boss.hint + (stolen ? ` (${stolen.name} is off.)` : '') : 'Pick spin and speed, drag to move, then swipe up to aim.';
   updateHUD(); renderReadout();
 }
 
@@ -523,14 +568,13 @@ function startRun() {
   const pool = BOSSES.map((b) => b.id);
   const order = [];
   while (order.length < RUN_FLOORS - 1 && pool.length) order.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
-  Object.assign(R, { floor: 1, station: 0, cash: START_CASH, charms: [], bag: ['house'], ballId: 'house', boss: null,
-    bossOrder: order, stolen: null, rerollCost: REROLL_BASE, offers: [], cleared: [], totals: { score: 0, strikes: 0, spares: 0 } });
+  Object.assign(R, newRunState(), { bossOrder: order });
   setBall('house');
   showMap();
 }
 function showMap() {
   S.mode = 'menu';
-  R.boss = null; R.stolen = null;
+  R.boss = null; R.stolenIdx = -1;
   applySpeedCap();
   $('mapTitle').textContent = `Floor ${R.floor} of ${RUN_FLOORS}`;
   $('mapList').innerHTML = STATIONS.map((d, i) => {
@@ -546,65 +590,141 @@ function showMap() {
 }
 function openShop() {
   S.mode = 'menu';
-  R.rerollCost = REROLL_BASE;
+  R.rerollCost = REROLL_BASE; R.rerollsThisShop = 0;
   rollOffers(true);
+  $('pinPicker').classList.add('hidden');
   $('shopOverlay').classList.remove('hidden');
   renderShop();
 }
-function pickCharms(n) {
-  const pool = CHARMS.filter((c) => !R.charms.includes(c.id));
+const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+// charms are drawn by rarity weight (Common 60 / Uncommon 30 / Rare 10), never one you already own or one already on offer
+function pickCharms(n, exclude = []) {
+  let pool = CHARMS.filter((c) => !R.charms.includes(c.id) && !exclude.includes(c.id));
   const out = [];
-  while (out.length < n && pool.length) out.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0].id);
+  while (out.length < n && pool.length) {
+    const total = pool.reduce((a, c) => a + RARITY[c.rarity].weight, 0);
+    let r = Math.random() * total, i = 0;
+    while ((r -= RARITY[pool[i].rarity].weight) > 0) i++;
+    out.push(pool[i].id); pool = pool.filter((_, k) => k !== i);
+  }
   return out;
 }
-function rollOffers(withBall) {
-  const ballsLeft = Object.keys(BALLS).filter((id) => !R.bag.includes(id));
-  const oldBall = R.offers.find((o) => o.kind === 'ball' && !o.sold);
-  const ballOffer = withBall ? (ballsLeft.length ? { kind: 'ball', id: ballsLeft[Math.floor(Math.random() * ballsLeft.length)] } : null) : oldBall || null;
-  const charmIds = pickCharms(ballOffer ? 2 : 3);
-  R.offers = charmIds.map((id) => ({ kind: 'charm', id }));
-  if (ballOffer) R.offers.push(ballOffer);
+function pickSupply(exclude) {
+  for (let tries = 0; tries < 20; tries++) {
+    const kind = pick(['oil', 'oil', 'trophy', 'trophy', 'pinmod', 'pinmod']);
+    const id = kind === 'oil' ? pick(Object.keys(OILS)) : kind === 'trophy' ? pick(TROPHIES).id : pick(Object.keys(PIN_MODS));
+    if (!exclude.some((o) => o.kind === kind && o.id === id)) return { kind, id };
+  }
+  return { kind: 'oil', id: 'bumpers' };
 }
+// The shop shows 2 charms, 1 ball (or a 3rd charm once you own every ball) and 2 supplies.
+// A reroll replaces everything that hasn't been bought; a ball on offer stays.
+function rollOffers(fresh) {
+  const offers = fresh ? [] : R.offers.filter((o) => o.kind === 'ball' && !o.sold);
+  const ballsLeft = Object.keys(BALLS).filter((id) => !R.bag.includes(id));
+  if (fresh && ballsLeft.length) offers.push({ kind: 'ball', id: pick(ballsLeft) });
+  offers.push(...pickCharms(3 - offers.length).map((id) => ({ kind: 'charm', id })));
+  while (offers.length < 5) offers.push(pickSupply(offers));
+  const order = { charm: 0, ball: 1, oil: 2, trophy: 2, pinmod: 2 };
+  R.offers = offers.sort((a, b) => order[a.kind] - order[b.kind]);
+}
+const shopPrice = (base) => Math.max(1, base - charmFlag('discount'));
 function offerInfo(o) {
-  if (o.kind === 'charm') { const c = charmById(o.id); return { icon: c.icon, name: c.name, desc: c.desc, price: c.price, tag: 'Charm' }; }
-  const b = BALLS[o.id]; return { icon: '', ball: b, name: b.name, desc: b.desc, price: b.price, tag: 'Ball' };
+  if (o.kind === 'charm') { const c = charmById(o.id); return { icon: c.icon, name: c.name, desc: charmDesc(c), price: shopPrice(c.price), tag: `${RARITY[c.rarity].label} charm`, rarity: c.rarity }; }
+  if (o.kind === 'ball') { const b = BALLS[o.id]; return { ball: b, name: b.name, desc: b.desc, price: shopPrice(b.price), tag: 'Ball' }; }
+  if (o.kind === 'oil') { const x = OILS[o.id]; return { icon: x.icon, name: x.name, desc: x.desc, price: shopPrice(x.price), tag: 'Lane Oil' }; }
+  if (o.kind === 'trophy') {
+    const x = TROPHIES.find((t) => t.id === o.id);
+    return { icon: x.icon, name: x.name, desc: `${x.desc} (Now Lv.${rollLevel(o.id)})`, price: shopPrice(x.price), tag: 'Trophy' };
+  }
+  const x = PIN_MODS[o.id]; return { icon: x.icon, name: x.name, desc: x.desc + ' Pick a pin to place it on.', price: shopPrice(x.price), tag: 'Pin mod' };
+}
+function offerBlocked(o) {
+  if (o.kind === 'charm' && R.charms.length >= CHARM_SLOTS) return 'Slots full';
+  if (o.kind === 'ball' && R.bag.length >= BAG_SLOTS) return 'Bag full';
+  if (o.kind === 'oil' && R.oils.length >= OIL_SLOTS) return 'Oils full';
+  return '';
 }
 function renderShop() {
   $('shopCash').textContent = '$' + R.cash;
-  $('shopOffers').innerHTML = R.offers.map((o, i) => {
-    const f = offerInfo(o);
-    const full = o.kind === 'charm' ? R.charms.length >= CHARM_SLOTS : R.bag.length >= BAG_SLOTS;
-    const label = o.sold ? 'Sold' : full ? (o.kind === 'charm' ? 'Slots full' : 'Bag full') : `Buy $${f.price}`;
+  const row = (o, i) => {
+    const f = offerInfo(o), blocked = offerBlocked(o);
+    const label = o.sold ? 'Sold' : blocked || `Buy $${f.price}`;
     const icon = f.ball ? `<i class="ball-dot" style="background:${ballGradient(f.ball)}"></i>` : `<i class="charm-icon">${f.icon}</i>`;
-    return `<div class="offer${o.sold ? ' sold' : ''}">${icon}<div class="offer-text"><span class="eyebrow">${f.tag}</span><b>${f.name}</b><p>${f.desc}</p></div>
-      <button class="btn small buy" data-i="${i}" type="button" ${o.sold || full || R.cash < f.price ? 'disabled' : ''}>${label}</button></div>`;
-  }).join('') || '<p class="end-note">Sold out.</p>';
+    return `<div class="offer${o.sold ? ' sold' : ''}${f.rarity ? ' ' + f.rarity : ''}">${icon}<div class="offer-text"><span class="eyebrow">${f.tag}</span><b>${f.name}</b><p>${f.desc}</p></div>
+      <button class="btn small buy" data-i="${i}" type="button" ${o.sold || blocked || R.cash < f.price ? 'disabled' : ''}>${label}</button></div>`;
+  };
+  const main = R.offers.map((o, i) => [o, i]).filter(([o]) => o.kind === 'charm' || o.kind === 'ball');
+  const sup = R.offers.map((o, i) => [o, i]).filter(([o]) => !(o.kind === 'charm' || o.kind === 'ball'));
+  $('shopOffers').innerHTML = main.map(([o, i]) => row(o, i)).join('') || '<p class="end-note">Sold out.</p>';
+  $('shopSupplies').innerHTML = sup.map(([o, i]) => row(o, i)).join('');
   $('shopOwned').innerHTML = R.charms.length
-    ? R.charms.map((id) => { const c = charmById(id); return `<div class="owned"><i class="charm-icon">${c.icon}</i><div class="offer-text"><b>${c.name}</b><p>${c.desc}</p></div><button class="btn small sell" data-id="${id}" type="button">Sell $${sellPrice(c)}</button></div>`; }).join('')
+    ? R.charms.map((id, i) => { const c = charmById(id); return `<div class="owned"><i class="charm-icon">${c.icon}</i><div class="offer-text"><b>${c.name}</b><p>${charmDesc(c)}</p></div><button class="btn small sell" data-i="${i}" type="button">Sell $${sellPrice(c)}</button></div>`; }).join('')
     : '<p class="end-note">No charms yet. You have room for 5.</p>';
-  $('rerollBtn').textContent = `Reroll $${R.rerollCost}`;
-  $('rerollBtn').disabled = R.cash < R.rerollCost;
+  // your rack (pin mods), roll levels and oils
+  const levels = Object.keys(ROLL_TYPES).filter((k) => rollLevel(k) > 1).map((k) => `<span class="chip-lv">${ROLL_TYPES[k].name} Lv.${rollLevel(k)}</span>`).join('');
+  const oils = R.oils.map((id) => `<span class="chip-lv">${OILS[id].icon} ${OILS[id].name}</span>`).join('');
+  $('shopExtras').innerHTML = `<div class="rack-mini">${pinTriangle(false)}</div>
+    <div class="extras-text">${levels || '<span class="muted">No Trophies yet.</span>'}${oils ? `<div class="oil-chips">${oils}</div>` : ''}</div>`;
+  const free = charmFlag('freeReroll') && R.rerollsThisShop === 0;
+  $('rerollBtn').textContent = free ? 'Reroll (free)' : `Reroll $${R.rerollCost}`;
+  $('rerollBtn').disabled = !free && R.cash < R.rerollCost;
   updateHUD();
 }
+// a 10-pin triangle (7-8-9-10 at the back) showing pin mods; clickable when choosing where a mod goes
+function pinTriangle(clickable, highlight) {
+  const rows = [[7, 8, 9, 10], [4, 5, 6], [2, 3], [1]];
+  return rows.map((r) => `<div class="tri-row">${r.map((n) => {
+    const m = R.pinMods[n] ? PIN_MODS[R.pinMods[n]] : null;
+    const style = m ? `style="background:${m.dot}"` : '';
+    return clickable
+      ? `<button type="button" class="tri-pin${m ? ' modded' : ''}" data-n="${n}" ${style} aria-label="Pin ${n}${m ? ', ' + m.name : ''}">${m ? m.icon : n}</button>`
+      : `<i class="tri-dot${m ? ' modded' : ''}" ${style} title="Pin ${n}${m ? ': ' + m.name : ''}"></i>`;
+  }).join('')}</div>`).join('');
+}
 const sellPrice = (c) => Math.max(1, Math.floor(c.price / 2));
-$('shopOffers').addEventListener('click', (e) => {
-  const btn = e.target.closest('.buy'); if (!btn || btn.disabled) return;
-  const o = R.offers[+btn.dataset.i], f = offerInfo(o);
-  if (o.sold || R.cash < f.price) return;
-  if (o.kind === 'charm') { if (R.charms.length >= CHARM_SLOTS) return; R.charms.push(o.id); }
-  else { if (R.bag.length >= BAG_SLOTS) return; R.bag.push(o.id); setBall(o.id); }
+let pendingMod = null;
+function buyOffer(i) {
+  const o = R.offers[i], f = offerInfo(o);
+  if (!o || o.sold || offerBlocked(o) || R.cash < f.price) return;
+  if (o.kind === 'pinmod') {
+    pendingMod = i;
+    $('pickerTitle').textContent = `Place your ${f.name}`;
+    $('pickerPins').innerHTML = pinTriangle(true);
+    $('pinPicker').classList.remove('hidden');
+    return;
+  }
+  if (o.kind === 'charm') R.charms.push(o.id);
+  else if (o.kind === 'ball') { R.bag.push(o.id); setBall(o.id); }
+  else if (o.kind === 'oil') R.oils.push(o.id);
+  else if (o.kind === 'trophy') R.levels[o.id] = rollLevel(o.id) + 1;
   R.cash -= f.price; o.sold = true;
   renderShop();
+}
+$('shopOverlay').addEventListener('click', (e) => {
+  const buy = e.target.closest('.buy');
+  if (buy && !buy.disabled) return buyOffer(+buy.dataset.i);
+  const sell = e.target.closest('.sell');
+  if (sell) {
+    const i = +sell.dataset.i, c = charmById(R.charms[i]);
+    R.charms.splice(i, 1); R.cash += sellPrice(c);
+    if (!R.charms.includes(c.id)) delete R.cs[c.id];
+    return renderShop();
+  }
+  const pinBtn = e.target.closest('.tri-pin');
+  if (pinBtn && pendingMod != null) {
+    const o = R.offers[pendingMod], f = offerInfo(o);
+    R.pinMods[+pinBtn.dataset.n] = o.id;
+    R.cash -= f.price; o.sold = true; pendingMod = null;
+    $('pinPicker').classList.add('hidden');
+    return renderShop();
+  }
 });
-$('shopOwned').addEventListener('click', (e) => {
-  const btn = e.target.closest('.sell'); if (!btn) return;
-  const c = charmById(btn.dataset.id);
-  R.charms = R.charms.filter((id) => id !== c.id); R.cash += sellPrice(c);
-  renderShop();
-});
+$('pickerCancel').addEventListener('click', () => { pendingMod = null; $('pinPicker').classList.add('hidden'); });
 $('rerollBtn').addEventListener('click', () => {
-  if (R.cash < R.rerollCost) return;
-  R.cash -= R.rerollCost; R.rerollCost++;
+  const free = charmFlag('freeReroll') && R.rerollsThisShop === 0;
+  if (!free) { if (R.cash < R.rerollCost) return; R.cash -= R.rerollCost; R.rerollCost++; }
+  R.rerollsThisShop++;
   rollOffers(false);
   renderShop();
 });
@@ -664,32 +784,73 @@ function updateHUD() {
   $('progress').style.width = Math.min(100, (S.score / S.target) * 100) + '%';
   const up = new Set(standing().map((p) => p.n));
   const bolted = new Set(pins.filter((p) => p.bolted).map((p) => p.n));
+  const modAt = new Map(pins.filter((p) => p.mod).map((p) => [p.n, p.mod]));
   for (let n = 1; n <= 10; n++) {
     pinMapEls[n].classList.toggle('down', !up.has(n) && !bolted.has(n));
     pinMapEls[n].classList.toggle('bolted', bolted.has(n));
+    const m = modAt.get(n);
+    pinMapEls[n].style.background = m && up.has(n) ? PIN_MODS[m].dot : '';
   }
   $('cash').textContent = '$' + R.cash;
   const slots = $('charmSlots');
-  const key = R.charms.join(',') + '|' + (R.stolen || '');
+  const key = R.charms.join(',') + '|' + R.stolenIdx + '|' + R.oils.join(',') + '|' + (S.oilArmed ?? '');
   if (slots.dataset.key !== key) {
     slots.dataset.key = key;
     slots.innerHTML = Array.from({ length: CHARM_SLOTS }, (_, i) => {
       const c = charmById(R.charms[i]);
-      const off = c && c.id === R.stolen;
-      return c ? `<button type="button" class="slot${off ? ' stolen' : ''}" data-id="${c.id}" aria-label="${c.name}: ${c.desc}${off ? ' (disabled by Charm Thief)' : ''}">${c.icon}</button>` : '<span class="slot empty"></span>';
+      const off = i === R.stolenIdx;
+      return c ? `<button type="button" class="slot${off ? ' stolen' : ''}" data-i="${i}" data-id="${c.id}" aria-label="${c.name}: ${charmDesc(c)}${off ? ' (disabled by Charm Thief)' : ''}">${c.icon}</button>` : '<span class="slot empty"></span>';
+    }).join('') + '<span class="slot-gap"></span>' + Array.from({ length: OIL_SLOTS }, (_, i) => {
+      const o = OILS[R.oils[i]];
+      return o ? `<button type="button" class="slot oil${S.oilArmed === i ? ' armed' : ''}" data-oil="${i}" aria-label="Lane Oil: ${o.name}. ${o.desc}">${o.icon}</button>` : '<span class="slot empty oil"></span>';
     }).join('');
   }
 }
 $('charmSlots').addEventListener('click', (e) => {
+  const ob = e.target.closest('.slot[data-oil]');
+  if (ob) return tapOil(+ob.dataset.oil);
   const b = e.target.closest('.slot[data-id]'); if (!b) return;
   const c = charmById(b.dataset.id);
-  $('hint').innerHTML = `<b>${c.name}</b>: ${c.desc}`;
+  $('hint').innerHTML = `<b>${c.name}</b>: ${charmDesc(c)}`;
 });
+// Lane Oils: first tap shows what it does, second tap uses it
+function tapOil(i) {
+  const o = OILS[R.oils[i]]; if (!o) return;
+  if (S.oilArmed !== i) {
+    S.oilArmed = i; updateHUD();
+    $('hint').innerHTML = `<b>${o.name}</b>: ${o.desc} <b>Tap it again to use.</b>`;
+    return;
+  }
+  S.oilArmed = null;
+  const msg = useOil(o.id);
+  if (msg === false) { updateHUD(); return; }
+  R.oils.splice(i, 1);
+  $('hint').innerHTML = `<b>${o.name}</b> used. ${msg}`;
+  updateHUD();
+}
+function useOil(id) {
+  const fail = (t) => { $('hint').textContent = t; return false; };
+  if (S.mode !== 'aim') return fail('Use Lane Oils while lining up a throw.');
+  if (id === 'bumpers') { S.bumperNext = true; return 'This roll can\'t gutter.'; }
+  if (id === 'dry') { S.dryNext = true; return 'No oil on this roll: it hooks from the foul line.'; }
+  if (id === 'double') { S.doubleNext = true; return 'This roll gets ×2 Mult.'; }
+  if (id === 'extra') { S.frames++; return `You now have ${S.frames} frames.`; }
+  if (id === 'fresh') {
+    if (S.ballInFrame !== 2) return fail('Fresh Rack works on a second ball, when pins are left standing.');
+    S.ballInFrame = 1; S.wasSplit = false; makeRack(); return 'Full rack, and this ball can still be a strike.';
+  }
+  if (id === 'copycat') {
+    if (!R.charms.length) return fail('Copycat needs a charm to copy.');
+    if (R.charms.length >= CHARM_SLOTS) return fail('Copycat needs a free charm slot.');
+    const c = pick(R.charms); R.charms.push(c); return `Copied ${charmById(c).name}.`;
+  }
+  return fail('Nothing happened.');
+}
 function flashCharms(fired) {
   for (const ch of fired) {
-    const el = document.querySelector(`.slot[data-id="${ch.id}"]`);
-    if (!el) continue;
-    el.classList.remove('fired'); void el.offsetWidth; el.classList.add('fired');
+    document.querySelectorAll(`.slot[data-id="${ch.id}"]`).forEach((el) => {
+      el.classList.remove('fired'); void el.offsetWidth; el.classList.add('fired');
+    });
   }
 }
 function renderReadout() {
@@ -700,10 +861,11 @@ function renderReadout() {
     : '');
 }
 let popupT = null;
-function showPopup(title, cls, pinsVal, mult, total, fired = []) {
+function showPopup(title, cls, pinsVal, mult, total, fired = [], cash = 0) {
   const el = $('popupTitle');
   el.textContent = title; el.className = 'popup-title ' + cls;
-  $('popupMath').innerHTML = `<span class="chip">${pinsVal}</span>×<span class="chip mult">${mult}</span>=<span class="chip total">${total.toLocaleString()}</span>`;
+  $('popupMath').innerHTML = `<span class="chip">${pinsVal}</span>×<span class="chip mult">${mult}</span>=<span class="chip total">${total.toLocaleString()}</span>`
+    + (cash ? `<span class="chip cash">+$${cash}</span>` : '');
   $('popupCharms').innerHTML = fired.map((c) => `<span>${c.icon} ${c.name}</span>`).join('');
   flashCharms(fired);
   $('popup').classList.add('show');
@@ -855,8 +1017,11 @@ setSpeed(17);
 
 $('rerackBtn').addEventListener('click', () => {
   if (!(S.mode === 'aim' && S.ballInFrame === 2 && S.reracks > 0)) return;
-  S.reracks--; S.ballInFrame = 1; S.wasSplit = false; makeRack(); updateHUD();
-  $('hint').textContent = 'Fresh rack. This ball can still be a strike.';
+  S.reracks--; S.ballInFrame = 1; S.wasSplit = false; makeRack();
+  const fired = fire('rerack', {});
+  flashCharms(fired);
+  updateHUD();
+  $('hint').textContent = 'Fresh rack. This ball can still be a strike.' + (fired.length ? ` (${fired.map((c) => c.name).join(', ')})` : '');
 });
 $('startBtn').addEventListener('click', () => { initAudio(); $('startOverlay').classList.add('hidden'); startRun(); });
 $('againBtn').addEventListener('click', () => { $('endOverlay').classList.add('hidden'); (endAction || startRun)(); });
@@ -890,6 +1055,7 @@ function update(dt) {
     if ((ball.done && !moving && S.rollTime > 0.6) || S.rollTime > 7) {
       setRumble(0);
       for (const p of pins) { p.vx = p.vz = 0; }
+      resolveGhosts();
       evaluateRoll(); updateHUD();
     }
   } else if (S.mode === 'result') {
@@ -964,7 +1130,7 @@ function drawPin(p) {
   ctx.fillStyle = 'rgba(40,20,5,.28)';
   ctx.beginPath(); ctx.ellipse(b.x + w * 0.2, b.y, w * 0.6, w * 0.22, 0, 0, Math.PI * 2); ctx.fill();
   ctx.translate(b.x, b.y);
-  const skin = p.bolted ? PIN_SKINS.bolted : boss().pinMass ? PIN_SKINS.heavy : PIN_SKINS.normal;
+  const skin = p.bolted ? PIN_SKINS.bolted : p.mod ? PIN_MODS[p.mod].skin : boss().pinMass ? PIN_SKINS.heavy : PIN_SKINS.normal;
   if (!p.down) {
     const tilt = Math.sin(performance.now() / 32) * p.wobble * 0.22;
     ctx.rotate(tilt);
@@ -1136,9 +1302,10 @@ function render() {
     const maxA = 7 * Math.PI / 180;
     let ang = r ? Math.atan2(r.targetX - ball.x, ARROW_Z - ball.z) : S.lastAng;
     ang = Math.max(-maxA, Math.min(maxA, ang));
-    const pred = predictPath(ball.x, ang, r ? r.mph : S.speed, r ? r.spin : S.spin);
+    const chaos = curBall().chaos;   // Ball of Chaos: the hook is a surprise, so the guide shows a straight line
+    const pred = predictPath(ball.x, ang, r ? r.mph : S.speed, chaos ? 0 : r ? r.spin : S.spin);
     ctx.setLineDash([7, 6]); ctx.lineWidth = 2.5;
-    ctx.strokeStyle = pred.gutter ? 'rgba(226,72,61,.9)' : r ? 'rgba(255,176,46,.95)' : 'rgba(255,176,46,.7)';
+    ctx.strokeStyle = chaos ? 'rgba(200,190,255,.6)' : pred.gutter && !S.bumperNext ? 'rgba(226,72,61,.9)' : r ? 'rgba(255,176,46,.95)' : 'rgba(255,176,46,.7)';
     ctx.beginPath();
     pred.pts.forEach(([x, z], i) => { const p = proj(x, z); i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); });
     ctx.stroke(); ctx.setLineDash([]);
@@ -1171,6 +1338,22 @@ function render() {
     ctx.fillStyle = fg; ctx.fillRect(0, yS, W, yF - yS);
     ctx.fillStyle = `rgba(96,90,98,${S.fogA})`; ctx.fillRect(0, 0, W, Math.max(0, yS));
   }
+  // Explosive Pin blasts
+  for (let i = blasts.length - 1; i >= 0; i--) {
+    const b = blasts[i];
+    b.t += 1 / 60;
+    if (b.t > 0.5) { blasts.splice(i, 1); continue; }
+    const p = proj(b.x, b.z), k = b.t / 0.5;
+    ctx.fillStyle = `rgba(255,${Math.round(180 - 120 * k)},40,${0.7 * (1 - k)})`;
+    ctx.beginPath(); ctx.arc(p.x, p.y - 6 * p.s, (4 + 18 * k) * p.s, 0, Math.PI * 2); ctx.fill();
+  }
+  // Bumpers: flash the lane edges when the ball bounces
+  if (S.bumpFlash > 0) {
+    S.bumpFlash -= 1 / 60;
+    for (const sgn of [-1, 1]) strip(sgn * laneEdge() - 1, sgn * laneEdge() + 1, Math.max(0, cam.z - 100), L, `rgba(120,220,255,${S.bumpFlash * 2})`);
+  }
+  // Bumpers (oil) armed: show rails along both edges
+  if (S.bumperNext && S.mode === 'aim') for (const sgn of [-1, 1]) strip(sgn * laneEdge() - 0.8, sgn * laneEdge() + 0.8, Math.max(0, cam.z - 100), L, 'rgba(120,220,255,.45)');
 }
 
 // ---------- Loop ----------
@@ -1185,7 +1368,8 @@ function frame(t) {
 window.render_game_to_text = () => JSON.stringify({
   coords: 'inches; x=0 lane center, +x right; z=0 foul line, head pin z=720',
   mode: S.mode, frame: S.frame + 1, frames: S.frames, ballInFrame: S.ballInFrame, score: S.score, target: S.target, reracks: S.reracks,
-  run: { floor: R.floor, station: STATIONS[R.station].name, cash: R.cash, charms: R.charms, bag: R.bag, ball: R.ballId, boss: R.boss && R.boss.id },
+  run: { floor: R.floor, station: STATIONS[R.station].name, cash: R.cash, charms: R.charms, bag: R.bag, ball: R.ballId, boss: R.boss && R.boss.id,
+    oils: R.oils, pinMods: R.pinMods, levels: R.levels },
   ball: { x: +ball.x.toFixed(1), z: +ball.z.toFixed(1), gutter: ball.gutter, done: ball.done },
   standing: standing().map((p) => p.n), camZ: Math.round(cam.z), lastThrow: S.lastThrow,
 });
@@ -1206,7 +1390,17 @@ window.__T = T;
 window.__state = S;
 window.__run = R;
 // QA helpers: grant a charm / ball / cash without the shop
-window.__give = (id) => { if (charmById(id) && !R.charms.includes(id)) R.charms.push(id); else if (BALLS[id] && !R.bag.includes(id)) { R.bag.push(id); setBall(id); } updateHUD(); };
+// __give('sock') charm · __give('magnet') ball · __give('oil:bumpers') · __give('trophy:strike')
+window.__give = (id) => {
+  const [kind, sub] = id.includes(':') ? id.split(':') : [null, id];
+  if (kind === 'oil' && OILS[sub]) R.oils.push(sub);
+  else if (kind === 'trophy' && ROLL_TYPES[sub]) R.levels[sub] = rollLevel(sub) + 1;
+  else if (charmById(id)) R.charms.push(id);
+  else if (BALLS[id] && !R.bag.includes(id)) { R.bag.push(id); setBall(id); }
+  updateHUD();
+};
+// __mod(5, 'boom') puts a pin mod on a rack position (takes effect on the next rack)
+window.__mod = (n, mod) => { if (mod) R.pinMods[n] = mod; else delete R.pinMods[n]; };
 window.__cash = (n) => { R.cash += n; updateHUD(); };
 // jump to floor n's map, optionally forcing its boss: __floor(3, 'fog') or __floor(8)
 window.__floor = (n, bossId) => {

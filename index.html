@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Bowlby+One&family=Barlow+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="style.css?v=p2a-bosses" />
+<link rel="stylesheet" href="style.css?v=p2b-content" />
 </head>
 <body>
 <div id="app">
@@ -69,12 +69,13 @@
   <div class="overlay" id="startOverlay">
     <div class="card">
       <div class="logo">Gutter<br />Run</div>
-      <p class="tag">Prototype v0.2 · Floor 1 run</p>
+      <p class="tag">Prototype v0.3 · Full run</p>
       <ul class="howto">
         <li><b>Move</b> by dragging the bar at the bottom.</li>
         <li><b>Spin and speed</b>: tap a curve and a speed before you throw. Slower balls hook more. The dotted line shows the path.</li>
         <li><b>Throw</b> by swiping up on the lane. The swipe only sets your aim, so take your time.</li>
-        <li><b>Clear 8 floors</b> of 3 stations each, with a boss at the end of every floor. Spend cash in the Pro Shop between stations.</li>
+        <li><b>Clear 8 floors</b> of 3 stations each, with a boss at the end of every floor.</li>
+        <li><b>Pro Shop</b> between stations: charms, balls, pin mods, Lane Oils and Trophies. Tap a Lane Oil twice to use it.</li>
       </ul>
       <p class="goal">Score = Pins × Mult.<br />Strike ×4 · Spare ×3 · Split pickup ×5 · Turkey ×8</p>
       <button class="btn primary" id="startBtn" type="button">Start Run</button>
@@ -103,10 +104,20 @@
     <div class="card shop">
       <div class="shop-head"><span class="end-title">Pro Shop</span><span class="cash big" id="shopCash">$0</span></div>
       <div class="shop-offers" id="shopOffers"></div>
+      <span class="eyebrow shop-sub">Supplies</span>
+      <div class="shop-offers" id="shopSupplies"></div>
       <button class="btn small wide" id="rerollBtn" type="button">Reroll $5</button>
       <span class="eyebrow shop-sub">Your charms</span>
       <div class="shop-owned" id="shopOwned"></div>
+      <span class="eyebrow shop-sub">Your rack, Trophies and oils</span>
+      <div class="shop-extras" id="shopExtras"></div>
       <button class="btn primary" id="shopNext" type="button">Next Station</button>
+      <div class="pin-picker hidden" id="pinPicker" role="dialog" aria-labelledby="pickerTitle">
+        <b id="pickerTitle">Place your pin mod</b>
+        <p>Tap a pin. It keeps the mod for the rest of the run, replacing any mod already there.</p>
+        <div class="tri" id="pickerPins"></div>
+        <button class="btn small wide" id="pickerCancel" type="button">Cancel</button>
+      </div>
     </div>
   </div>
 
@@ -116,6 +127,7 @@
     <button class="btn small wide" id="resetRackBtn" type="button">Reset pins (practice)</button>
   </div>
 </div>
-<script src="game.js?v=p2a-bosses"></script>
+<script src="content.js?v=p2b-content"></script>
+<script src="game.js?v=p2b-content"></script>
 </body>
 </html>

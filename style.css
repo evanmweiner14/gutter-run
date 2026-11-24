@@ -179,3 +179,32 @@ canvas#lane { position: absolute; inset: 0; width: 100%; height: 100%; display: 
 .speed-btn:disabled { opacity: .3; cursor: not-allowed; }
 .map-list li.final { border-color: var(--red); }
 .map-list li.final.now { box-shadow: 0 0 0 1px var(--red) inset; }
+
+/* Phase 2b: oils, rarity, supplies, pin mods */
+.slot-gap { width: 1px; align-self: stretch; margin: 4px 2px; background: var(--line); }
+.slot.oil { border-color: rgba(120,220,255,.5); }
+.slot.oil.empty { border-color: rgba(120,220,255,.2); }
+.slot.oil.armed { background: rgba(120,220,255,.2); box-shadow: 0 0 0 2px rgba(120,220,255,.8); }
+.charm-slots { align-items: center; }
+.popup-math .chip.cash { background: #2f9e5a; }
+.offer.uncommon { border-color: rgba(56,194,180,.55); }
+.offer.rare { border-color: rgba(255,176,46,.75); box-shadow: 0 0 0 1px rgba(255,176,46,.3) inset; }
+.offer.uncommon .eyebrow { color: var(--teal); }
+.offer.rare .eyebrow { color: var(--amber); }
+.shop-extras { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: center; padding: 10px; border-radius: 12px; background: var(--panel-2); border: 1px solid var(--line); }
+.extras-text { display: flex; flex-wrap: wrap; gap: 6px; font-size: 13px; }
+.extras-text .muted { color: var(--muted); }
+.oil-chips { display: flex; flex-wrap: wrap; gap: 6px; width: 100%; }
+.chip-lv { padding: 3px 8px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); font-weight: 700; font-size: 13px; }
+.tri-row { display: flex; justify-content: center; gap: 4px; margin: 2px 0; }
+.tri-dot { width: 12px; height: 12px; border-radius: 50%; background: #fbf6ee; display: block; }
+.tri-dot.modded { box-shadow: 0 0 0 1.5px rgba(0,0,0,.4) inset; }
+.pin-picker { position: absolute; left: 12px; right: 12px; top: 50%; transform: translateY(-50%); z-index: 2; padding: 16px; border-radius: 16px;
+  background: var(--panel); border: 1px solid var(--amber); box-shadow: 0 20px 60px rgba(0,0,0,.7); text-align: center; }
+.pin-picker.hidden { display: none; }
+.pin-picker p { color: var(--muted); font-size: 14px; margin: 6px 0 12px; }
+.tri-pin { width: 48px; height: 48px; border-radius: 50%; border: 1px solid var(--line); background: #fbf6ee; color: #2a1600;
+  font-family: var(--body); font-weight: 700; font-size: 16px; cursor: pointer; padding: 0; }
+.tri-pin.modded { font-size: 20px; }
+.tri-pin:active { transform: scale(.95); }
+.shop { position: relative; }
